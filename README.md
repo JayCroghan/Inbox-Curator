@@ -60,15 +60,15 @@ Press **Scan Gmail** to queue a scan. Scanning runs in a hosted background servi
 
 ### Human triage
 
-The default dashboard puts undecided clusters first and orders them by message volume. An exact normalized List-ID or fallback sender can be marked:
+The default dashboard puts truly unreviewed clusters first and orders them by message volume. An exact normalized List-ID or fallback sender can be marked:
 
 - **Keep / Protect**;
 - **Unwanted — Existing + Future**;
 - **Clean Existing Only**;
-- **Clean Older Than** 30 days, 90 days, one year, or a custom cutoff;
-- **Defer** without adding policy coverage.
+- **Clean Older Than** an explicit cutoff selected through 30-day, 90-day, one-year, or custom-date shortcuts;
+- **Defer** to mark the source reviewed without adding policy coverage.
 
-Decisions are editable and removable. Current state and append-only revision history are stored in SQLite. Coverage metrics are recalculated from current local message metadata immediately; relationship evidence remains visible but never blocks an explicit human decision. Cluster detail pages display paged subjects and flags already in SQLite and do not make Gmail API calls.
+Decisions are editable and removable. Current state and append-only revision history are stored in SQLite. The dashboard separates review progress from policy coverage: Deferred sources leave the Unreviewed queue but remain outside policy filters and coverage. Existing age rules always display their exact persisted cutoff and preserve it unless the user deliberately chooses a replacement. Coverage metrics are recalculated from current local message metadata immediately; relationship evidence remains visible but never blocks an explicit human decision. Cluster detail pages display paged subjects and flags already in SQLite and do not make Gmail API calls.
 
 ![Synthetic MAIL-002 triage dashboard](docs/screenshots/mail-002-triage-dashboard.png)
 

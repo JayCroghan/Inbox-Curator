@@ -297,7 +297,7 @@ tbody tr:hover { background: rgb(255 255 255 / 31%); }
 .triage-table { min-width: 1560px; }
 .triage-table .source-column { width: 215px; }
 .decision-column { width: 220px; }
-.is-decided-row { background: rgb(94 123 100 / 4%); }
+.is-reviewed-row { background: rgb(94 123 100 / 4%); }
 .source-link { display: block; text-decoration: none; }
 .source-link:hover strong { color: var(--accent-deep); }
 

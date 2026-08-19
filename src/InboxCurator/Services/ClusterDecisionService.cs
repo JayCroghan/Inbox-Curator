@@ -17,7 +17,6 @@ public sealed class ClusterDecisionService(
         }
 
         var targetValue = NormalizeTarget(request.TargetType, request.TargetValue);
-        var cutoffDateUtc = ValidateAndConvertCutoff(request.DecisionKind, request.CutoffDate);
         var appliesToFuture = AppliesToFuture(request.DecisionKind);
         var groupKey = GroupKey(request.TargetType, targetValue);
 
@@ -33,6 +32,7 @@ public sealed class ClusterDecisionService(
             .SingleOrDefaultAsync(
                 item => item.TargetType == request.TargetType && item.TargetValue == targetValue,
                 cancellationToken);
+        var cutoffDateUtc = ValidateAndConvertCutoff(request, decision);
         var now = timeProvider.GetUtcNow().UtcDateTime;
         var changeKind = decision is null ? ClusterDecisionChangeKind.Created : ClusterDecisionChangeKind.Replaced;
 
@@ -132,25 +132,45 @@ public sealed class ClusterDecisionService(
     public static bool AppliesToFuture(ClusterDecisionKind decisionKind) => decisionKind is
         ClusterDecisionKind.KeepProtect or ClusterDecisionKind.UnwantedExistingAndFuture;
 
-    private DateTime? ValidateAndConvertCutoff(ClusterDecisionKind decisionKind, DateOnly? cutoffDate)
+    private DateTime? ValidateAndConvertCutoff(
+        SetClusterDecisionRequest request,
+        ClusterDecision? existingDecision)
     {
-        if (decisionKind == ClusterDecisionKind.CleanOlderThan)
+        if (request.PreserveExistingCutoff)
         {
-            if (cutoffDate is null)
+            if (request.DecisionKind != ClusterDecisionKind.CleanOlderThan || request.CutoffDate is not null)
+            {
+                throw new ClusterDecisionValidationException("An existing cutoff can be preserved only for a clean-older-than decision.");
+            }
+
+            if (existingDecision is null ||
+                !existingDecision.IsActive ||
+                existingDecision.DecisionKind != ClusterDecisionKind.CleanOlderThan ||
+                existingDecision.CutoffDateUtc is null)
+            {
+                throw new ClusterDecisionValidationException("There is no active age-rule cutoff to preserve.");
+            }
+
+            return existingDecision.CutoffDateUtc;
+        }
+
+        if (request.DecisionKind == ClusterDecisionKind.CleanOlderThan)
+        {
+            if (request.CutoffDate is null)
             {
                 throw new ClusterDecisionValidationException("Clean older than requires a cutoff date.");
             }
 
             var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
-            if (cutoffDate > today)
+            if (request.CutoffDate > today)
             {
                 throw new ClusterDecisionValidationException("The cutoff date cannot be in the future.");
             }
 
-            return DateTime.SpecifyKind(cutoffDate.Value.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+            return DateTime.SpecifyKind(request.CutoffDate.Value.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
         }
 
-        if (cutoffDate is not null)
+        if (request.CutoffDate is not null)
         {
             throw new ClusterDecisionValidationException("A cutoff date is valid only for clean-older-than decisions.");
         }
@@ -195,7 +215,8 @@ public sealed record SetClusterDecisionRequest(
     ClusterTargetType TargetType,
     string TargetValue,
     ClusterDecisionKind DecisionKind,
-    DateOnly? CutoffDate = null);
+    DateOnly? CutoffDate = null,
+    bool PreserveExistingCutoff = false);
 
 public sealed record ClusterDecisionSnapshot(
     long Id,
@@ -225,7 +246,7 @@ public static class ClusterDecisionPresentation
         ClusterDecisionKind.CleanExistingOnly => "Clean existing only",
         ClusterDecisionKind.CleanOlderThan => "Clean older than",
         ClusterDecisionKind.Defer => "Deferred",
-        _ => "Undecided"
+        _ => "Unreviewed"
     };
 
     public static string CssClass(ClusterDecisionKind? decisionKind) => decisionKind switch
@@ -235,6 +256,6 @@ public static class ClusterDecisionPresentation
         ClusterDecisionKind.CleanExistingOnly => "is-clean",
         ClusterDecisionKind.CleanOlderThan => "is-age",
         ClusterDecisionKind.Defer => "is-deferred",
-        _ => "is-undecided"
+        _ => "is-unreviewed"
     };
 }

@@ -102,6 +102,68 @@ public sealed class ClusterDecisionServiceTests
     }
 
     [Fact]
+    public async Task Defer_ReviewsSourceWithoutPolicyAndReplacementUpdatesBothStates()
+    {
+        await using var store = new SqliteTestStore();
+        await store.InitializeAsync();
+        await AddMessageAsync(store, "high-1", ClusterTargetType.ListId, "high.example", new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc));
+        await AddMessageAsync(store, "high-2", ClusterTargetType.ListId, "high.example", new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
+        await AddMessageAsync(store, "low-1", ClusterTargetType.ListId, "low.example", new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc));
+        var service = CreateService(store);
+        var dashboard = new DashboardQueryService(store.Factory);
+
+        var before = await dashboard.QueryAsync(new DashboardRequest(null, "triage", "desc", 1, 10));
+        Assert.Equal("high.example", before.Groups[0].TargetValue);
+        Assert.False(before.Groups[0].HasHumanDecision);
+        Assert.False(before.Groups[0].HasPolicy);
+
+        await service.SetAsync(new SetClusterDecisionRequest(
+            ClusterTargetType.ListId,
+            "high.example",
+            ClusterDecisionKind.Defer));
+
+        var afterDefer = await dashboard.QueryAsync(new DashboardRequest(null, "triage", "desc", 1, 10));
+        var unreviewed = await dashboard.QueryAsync(new DashboardRequest(
+            null, "triage", "desc", 1, 10, DecisionState: "unreviewed"));
+        var deferred = await dashboard.QueryAsync(new DashboardRequest(
+            null, "triage", "desc", 1, 10, DecisionState: "deferred"));
+        var policyAfterDefer = await dashboard.QueryAsync(new DashboardRequest(
+            null, "triage", "desc", 1, 10, DecisionState: "policy"));
+
+        Assert.Equal("low.example", afterDefer.Groups[0].TargetValue);
+        Assert.Single(unreviewed.Groups);
+        Assert.Equal("low.example", unreviewed.Groups.Single().TargetValue);
+        Assert.Single(deferred.Groups);
+        Assert.Equal("high.example", deferred.Groups.Single().TargetValue);
+        Assert.True(deferred.Groups.Single().HasHumanDecision);
+        Assert.False(deferred.Groups.Single().HasPolicy);
+        Assert.Empty(policyAfterDefer.Groups);
+        Assert.Equal(1, afterDefer.Metrics.ReviewedGroupCount);
+        Assert.Equal(1, afterDefer.Metrics.UnreviewedGroupCount);
+        Assert.Equal(0, afterDefer.Metrics.PolicyDecisionCount);
+        Assert.Equal(0, afterDefer.Metrics.CoveredMessageCount);
+
+        await service.SetAsync(new SetClusterDecisionRequest(
+            ClusterTargetType.ListId,
+            "high.example",
+            ClusterDecisionKind.KeepProtect));
+
+        var afterPolicy = await dashboard.QueryAsync(new DashboardRequest(null, "triage", "desc", 1, 10));
+        var deferredAfterPolicy = await dashboard.QueryAsync(new DashboardRequest(
+            null, "triage", "desc", 1, 10, DecisionState: "deferred"));
+        var policy = await dashboard.QueryAsync(new DashboardRequest(
+            null, "triage", "desc", 1, 10, DecisionState: "policy"));
+
+        Assert.Empty(deferredAfterPolicy.Groups);
+        Assert.Single(policy.Groups);
+        Assert.True(policy.Groups.Single().HasHumanDecision);
+        Assert.True(policy.Groups.Single().HasPolicy);
+        Assert.Equal(1, afterPolicy.Metrics.ReviewedGroupCount);
+        Assert.Equal(1, afterPolicy.Metrics.PolicyDecisionCount);
+        Assert.Equal(2, afterPolicy.Metrics.CoveredMessageCount);
+    }
+
+    [Fact]
     public async Task RemoveAsync_DeactivatesDecisionAndPreservesRemovalAudit()
     {
         await using var store = new SqliteTestStore();
@@ -126,9 +188,10 @@ public sealed class ClusterDecisionServiceTests
         Assert.False(history[^1].IsActive);
         var dashboard = await new DashboardQueryService(store.Factory).QueryAsync(
             new DashboardRequest(null, "triage", "desc", 1, 10));
-        Assert.Equal(0, dashboard.Metrics.DecisionCount);
+        Assert.Equal(0, dashboard.Metrics.PolicyDecisionCount);
         Assert.Equal(0, dashboard.Metrics.CoveredMessageCount);
-        Assert.False(dashboard.Groups.Single().IsDecided);
+        Assert.False(dashboard.Groups.Single().HasHumanDecision);
+        Assert.False(dashboard.Groups.Single().HasPolicy);
     }
 
     [Fact]
@@ -162,13 +225,83 @@ public sealed class ClusterDecisionServiceTests
             new DashboardRequest(null, "triage", "desc", 1, 10));
 
         Assert.Equal(7, result.Metrics.MessageCount);
-        Assert.Equal(3, result.Metrics.DecisionCount);
+        Assert.Equal(3, result.Metrics.PolicyDecisionCount);
+        Assert.Equal(3, result.Metrics.ReviewedGroupCount);
+        Assert.Equal(0, result.Metrics.UnreviewedGroupCount);
         Assert.Equal(2, result.Metrics.KeptMessageCount);
         Assert.Equal(1, result.Metrics.AgeRuleAffectedMessageCount);
         Assert.Equal(4, result.Metrics.IntendedQuarantineMessageCount);
         Assert.Equal(6, result.Metrics.CoveredMessageCount);
-        Assert.Equal(1, result.Metrics.UndecidedMessageCount);
-        Assert.Equal(6d / 7d * 100d, result.Metrics.CoveragePercentage, precision: 6);
+        Assert.Equal(6d / 7d * 100d, result.Metrics.PolicyCoveragePercentage, precision: 6);
+    }
+
+    [Theory]
+    [InlineData(2026, 7, 20, "30-day shortcut")]
+    [InlineData(2026, 5, 21, "custom cutoff")]
+    [InlineData(2025, 8, 19, "1-year shortcut")]
+    public async Task SetAsync_PreservesExistingExplicitAgeCutoff(
+        int year,
+        int month,
+        int day,
+        string origin)
+    {
+        await using var store = new SqliteTestStore();
+        await store.InitializeAsync();
+        await AddMessageAsync(store, "m1", ClusterTargetType.ListId, "age.example", new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        var service = CreateService(store);
+        var cutoff = new DateOnly(year, month, day);
+        await service.SetAsync(new SetClusterDecisionRequest(
+            ClusterTargetType.ListId,
+            "age.example",
+            ClusterDecisionKind.CleanOlderThan,
+            cutoff));
+
+        var preserved = await service.SetAsync(new SetClusterDecisionRequest(
+            ClusterTargetType.ListId,
+            "age.example",
+            ClusterDecisionKind.CleanOlderThan,
+            PreserveExistingCutoff: true));
+
+        var expectedCutoff = cutoff.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        Assert.True(
+            preserved.CutoffDateUtc == expectedCutoff,
+            $"The {origin} should remain at {expectedCutoff:O} when editing without a replacement.");
+        Assert.Equal(2, preserved.Revision);
+        await using var db = await store.Factory.CreateDbContextAsync();
+        Assert.Equal(
+            [preserved.CutoffDateUtc, preserved.CutoffDateUtc],
+            await db.ClusterDecisionAudits.OrderBy(audit => audit.Revision)
+                .Select(audit => audit.CutoffDateUtc)
+                .ToListAsync());
+    }
+
+    [Fact]
+    public async Task SetAsync_ChangingExplicitCutoffUpdatesAffectedMessageCount()
+    {
+        await using var store = new SqliteTestStore();
+        await store.InitializeAsync();
+        await AddMessageAsync(store, "old", ClusterTargetType.ListId, "age.example", new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        await AddMessageAsync(store, "middle", ClusterTargetType.ListId, "age.example", new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
+        await AddMessageAsync(store, "new", ClusterTargetType.ListId, "age.example", new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc));
+        var service = CreateService(store);
+        var dashboard = new DashboardQueryService(store.Factory);
+        await service.SetAsync(new SetClusterDecisionRequest(
+            ClusterTargetType.ListId,
+            "age.example",
+            ClusterDecisionKind.CleanOlderThan,
+            new DateOnly(2026, 7, 1)));
+        var initial = await dashboard.QueryAsync(new DashboardRequest(null, "triage", "desc", 1, 10));
+
+        await service.SetAsync(new SetClusterDecisionRequest(
+            ClusterTargetType.ListId,
+            "age.example",
+            ClusterDecisionKind.CleanOlderThan,
+            new DateOnly(2026, 2, 1)));
+        var changed = await dashboard.QueryAsync(new DashboardRequest(null, "triage", "desc", 1, 10));
+
+        Assert.Equal(2, initial.Groups.Single().AffectedMessageCount);
+        Assert.Equal(1, changed.Groups.Single().AffectedMessageCount);
+        Assert.Equal(new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc), changed.Groups.Single().DecisionCutoffDateUtc);
     }
 
     [Fact]
@@ -185,6 +318,12 @@ public sealed class ClusterDecisionServiceTests
             new SetClusterDecisionRequest(ClusterTargetType.ListId, "news.example", ClusterDecisionKind.KeepProtect, new DateOnly(2026, 1, 1))));
         await Assert.ThrowsAsync<ClusterDecisionValidationException>(() => service.SetAsync(
             new SetClusterDecisionRequest(ClusterTargetType.ListId, "news.example", ClusterDecisionKind.CleanOlderThan, new DateOnly(2026, 8, 20))));
+        await Assert.ThrowsAsync<ClusterDecisionValidationException>(() => service.SetAsync(
+            new SetClusterDecisionRequest(
+                ClusterTargetType.ListId,
+                "news.example",
+                ClusterDecisionKind.CleanOlderThan,
+                PreserveExistingCutoff: true)));
     }
 
     [Fact]

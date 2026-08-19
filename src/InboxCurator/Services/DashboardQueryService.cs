@@ -64,7 +64,8 @@ public sealed class DashboardQueryService(IDbContextFactory<InboxCuratorDbContex
                 DecisionKind = decision == null ? null : decision.DecisionKind,
                 DecisionCutoffDateUtc = decision == null ? null : decision.CutoffDateUtc,
                 AppliesToFuture = decision != null && decision.AppliesToFuture,
-                IsDecided = decision != null && decision.DecisionKind != ClusterDecisionKind.Defer
+                HasHumanDecision = decision != null,
+                HasPolicy = decision != null && decision.DecisionKind != ClusterDecisionKind.Defer
             };
 
         groupsWithDecisions = ApplyFilters(groupsWithDecisions, request);
@@ -93,8 +94,9 @@ public sealed class DashboardQueryService(IDbContextFactory<InboxCuratorDbContex
     {
         query = request.DecisionState?.ToLowerInvariant() switch
         {
-            "undecided" => query.Where(group => !group.IsDecided),
-            "decided" => query.Where(group => group.IsDecided),
+            "unreviewed" or "undecided" => query.Where(group => !group.HasHumanDecision),
+            "policy" or "decided" => query.Where(group => group.HasPolicy),
+            "deferred" => query.Where(group => group.DecisionKind == ClusterDecisionKind.Defer),
             _ => query
         };
 
@@ -195,10 +197,14 @@ public sealed class DashboardQueryService(IDbContextFactory<InboxCuratorDbContex
         var relationshipMessages = await db.Messages.CountAsync(
             message => message.HasDirectCorrespondence || message.HasThreadInteraction,
             cancellationToken);
-        var activePolicyDecisions = db.ClusterDecisions.AsNoTracking().Where(
-            decision => decision.IsActive && decision.DecisionKind != ClusterDecisionKind.Defer);
-        var decisionCount = await activePolicyDecisions.CountAsync(cancellationToken);
-        var decidedGroups = await (
+        var activeHumanDecisions = db.ClusterDecisions.AsNoTracking().Where(decision => decision.IsActive);
+        var activePolicyDecisions = activeHumanDecisions.Where(
+            decision => decision.DecisionKind != ClusterDecisionKind.Defer);
+        var reviewedGroups = await (
+            from groupKey in db.Messages.Select(message => message.GroupKey).Distinct()
+            join decision in activeHumanDecisions on groupKey equals decision.GroupKey
+            select groupKey).CountAsync(cancellationToken);
+        var policyGroups = await (
             from groupKey in db.Messages.Select(message => message.GroupKey).Distinct()
             join decision in activePolicyDecisions on groupKey equals decision.GroupKey
             select groupKey).CountAsync(cancellationToken);
@@ -231,13 +237,13 @@ public sealed class DashboardQueryService(IDbContextFactory<InboxCuratorDbContex
             totalMessages,
             totalGroups,
             relationshipMessages,
-            totalGroups - decidedGroups,
-            Math.Max(0, totalMessages - coveredMessages),
+            totalGroups - reviewedGroups,
+            reviewedGroups,
             keptMessages,
             intendedQuarantineMessages,
             ageRuleMessages,
             coveredMessages,
-            decisionCount);
+            policyGroups);
     }
 
     private static IOrderedQueryable<GroupSummary> ApplySort(
@@ -265,7 +271,7 @@ public sealed class DashboardQueryService(IDbContextFactory<InboxCuratorDbContex
             ("promotion", true) => query.OrderByDescending(group => group.PromotionCount * 1.0 / group.MessageCount),
             ("count", false) => query.OrderBy(group => group.MessageCount),
             ("count", true) => query.OrderByDescending(group => group.MessageCount),
-            _ => query.OrderBy(group => group.IsDecided).ThenByDescending(group => group.MessageCount)
+            _ => query.OrderBy(group => group.HasHumanDecision).ThenByDescending(group => group.MessageCount)
         };
     }
 }
@@ -295,15 +301,16 @@ public sealed record DashboardMetrics(
     int MessageCount,
     int GroupCount,
     int RelationshipCount,
-    int UndecidedGroupCount,
-    int UndecidedMessageCount,
+    int UnreviewedGroupCount,
+    int ReviewedGroupCount,
     int KeptMessageCount,
     int IntendedQuarantineMessageCount,
     int AgeRuleAffectedMessageCount,
     int CoveredMessageCount,
-    int DecisionCount)
+    int PolicyDecisionCount)
 {
-    public double CoveragePercentage => MessageCount == 0 ? 0 : CoveredMessageCount * 100d / MessageCount;
+    public double ReviewPercentage => GroupCount == 0 ? 0 : ReviewedGroupCount * 100d / GroupCount;
+    public double PolicyCoveragePercentage => MessageCount == 0 ? 0 : CoveredMessageCount * 100d / MessageCount;
 }
 
 public sealed class GroupSummary
@@ -324,7 +331,8 @@ public sealed class GroupSummary
     public ClusterDecisionKind? DecisionKind { get; init; }
     public DateTime? DecisionCutoffDateUtc { get; init; }
     public bool AppliesToFuture { get; init; }
-    public bool IsDecided { get; init; }
+    public bool HasHumanDecision { get; init; }
+    public bool HasPolicy { get; init; }
     public int AffectedMessageCount { get; set; }
     public double PromotionPercentage => MessageCount == 0 ? 0 : PromotionCount * 100d / MessageCount;
     public IReadOnlyList<string> RepresentativeSubjects { get; set; } = [];

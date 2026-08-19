@@ -56,18 +56,18 @@
     <section class="metrics triage-metrics" aria-label="Mailbox decision summary">
         <div><span>Total messages</span><strong>@Model.Result.Metrics.MessageCount.ToString("N0")</strong></div>
         <div><span>Total sources</span><strong>@Model.Result.Metrics.GroupCount.ToString("N0")</strong></div>
-        <div><span>Undecided sources</span><strong>@Model.Result.Metrics.UndecidedGroupCount.ToString("N0")</strong></div>
-        <div><span>Undecided messages</span><strong>@Model.Result.Metrics.UndecidedMessageCount.ToString("N0")</strong></div>
+        <div><span>Unreviewed sources</span><strong>@Model.Result.Metrics.UnreviewedGroupCount.ToString("N0")</strong></div>
+        <div><span>Messages with explicit policy</span><strong>@Model.Result.Metrics.CoveredMessageCount.ToString("N0")</strong></div>
         <div><span>Kept / protected</span><strong>@Model.Result.Metrics.KeptMessageCount.ToString("N0")</strong></div>
         <div><span>Intended quarantine</span><strong>@Model.Result.Metrics.IntendedQuarantineMessageCount.ToString("N0")</strong></div>
         <div><span>Age-rule affected</span><strong>@Model.Result.Metrics.AgeRuleAffectedMessageCount.ToString("N0")</strong></div>
-        <div><span>Mailbox covered</span><strong>@Model.Result.Metrics.CoveragePercentage.ToString("0.0")%</strong></div>
+        <div><span>Mailbox policy coverage</span><strong>@Model.Result.Metrics.PolicyCoveragePercentage.ToString("0.0")%</strong></div>
     </section>
 
     <section class="decision-progress" aria-label="Decision progress">
-        <strong>@Model.Result.Metrics.DecisionCount.ToString("N0") decisions cover @Model.Result.Metrics.CoveragePercentage.ToString("0.0")% of your mailbox.</strong>
-        <span>@Model.Result.Metrics.CoveredMessageCount.ToString("N0") messages have explicit human policy · @Model.Result.Metrics.RelationshipCount.ToString("N0") messages carry relationship evidence</span>
-        <progress max="100" value="@Model.Result.Metrics.CoveragePercentage.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)">@Model.Result.Metrics.CoveragePercentage.ToString("0.0")%</progress>
+        <strong>@Model.Result.Metrics.ReviewedGroupCount.ToString("N0") sources reviewed · @Model.Result.Metrics.UnreviewedGroupCount.ToString("N0") remaining.</strong>
+        <span>@Model.Result.Metrics.PolicyDecisionCount.ToString("N0") explicit policies cover @Model.Result.Metrics.CoveredMessageCount.ToString("N0") messages (@Model.Result.Metrics.PolicyCoveragePercentage.ToString("0.0")%) · deferred review contributes no policy coverage</span>
+        <progress max="100" value="@Model.Result.Metrics.ReviewPercentage.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)">@Model.Result.Metrics.ReviewPercentage.ToString("0.0")% reviewed</progress>
     </section>
 
     <section class="census triage-ledger" aria-labelledby="census-title">
@@ -76,7 +76,7 @@
                 <p class="eyebrow">Highest leverage first</p>
                 <h2 id="census-title">Source decisions</h2>
             </div>
-            <p class="toolbar-note">Default order places undecided clusters first, then sorts by message volume.</p>
+            <p class="toolbar-note">Default order places unreviewed clusters first, then sorts by message volume.</p>
         </div>
 
         <form method="get" class="triage-filters" role="search">
@@ -87,9 +87,10 @@
             <label>
                 <span>Decision</span>
                 <select name="decisionState" data-auto-submit>
-                    <option value="all" selected="@(Model.DecisionState == "all")">All · undecided first</option>
-                    <option value="undecided" selected="@(Model.DecisionState == "undecided")">Undecided only</option>
-                    <option value="decided" selected="@(Model.DecisionState == "decided")">Decided</option>
+                    <option value="all" selected="@(Model.DecisionState == "all")">All · unreviewed first</option>
+                    <option value="unreviewed" selected="@(Model.DecisionState == "unreviewed")">Unreviewed</option>
+                    <option value="policy" selected="@(Model.DecisionState == "policy")">Policy decided</option>
+                    <option value="deferred" selected="@(Model.DecisionState == "deferred")">Deferred</option>
                 </select>
             </label>
             <label>
@@ -169,7 +170,7 @@
                     }
                     @foreach (var group in Model.Result.Groups)
                     {
-                        <tr class="@(group.IsDecided ? "is-decided-row" : "")">
+                        <tr class="@(group.HasHumanDecision ? "is-reviewed-row" : "")">
                             <td class="source-cell">
                                 <a class="source-link" asp-page="/Clusters/Detail" asp-route-targetType="@group.TargetType" asp-route-targetValue="@group.TargetValue" asp-route-returnUrl="@Model.CurrentUrl">
                                     <strong>@group.Display</strong>

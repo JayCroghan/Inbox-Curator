@@ -2,6 +2,7 @@ using InboxCurator.Data;
 using InboxCurator.Scanning;
 using InboxCurator.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace InboxCurator.Pages;
@@ -96,7 +97,13 @@ public sealed class IndexModel(
 
     public async Task<IActionResult> OnPostDecideAsync(CancellationToken cancellationToken)
     {
-        if (!ModelState.IsValid)
+        if (HasInvalidInput(
+                nameof(TargetType),
+                nameof(TargetValue),
+                nameof(Decision),
+                nameof(DecisionCutoffPreset),
+                nameof(CustomCutoff),
+                nameof(ReturnUrl)))
         {
             Notice = "The selected decision could not be understood.";
             return RedirectBack();
@@ -104,9 +111,16 @@ public sealed class IndexModel(
 
         try
         {
-            DateOnly? cutoff = Decision == ClusterDecisionKind.CleanOlderThan ? ResolveDecisionCutoff() : null;
+            var cutoff = Decision == ClusterDecisionKind.CleanOlderThan
+                ? ResolveDecisionCutoff()
+                : new ResolvedDecisionCutoff(null, false);
             var saved = await decisions.SetAsync(
-                new SetClusterDecisionRequest(TargetType, TargetValue, Decision, cutoff),
+                new SetClusterDecisionRequest(
+                    TargetType,
+                    TargetValue,
+                    Decision,
+                    cutoff.CutoffDate,
+                    cutoff.PreserveExisting),
                 cancellationToken);
             Notice = saved.DecisionKind == ClusterDecisionKind.Defer
                 ? "Source deferred. It remains outside policy coverage."
@@ -122,7 +136,7 @@ public sealed class IndexModel(
 
     public async Task<IActionResult> OnPostRemoveDecisionAsync(CancellationToken cancellationToken)
     {
-        if (!ModelState.IsValid)
+        if (HasInvalidInput(nameof(TargetType), nameof(TargetValue), nameof(ReturnUrl)))
         {
             Notice = "The selected decision target could not be understood.";
             return RedirectBack();
@@ -131,7 +145,7 @@ public sealed class IndexModel(
         try
         {
             var removed = await decisions.RemoveAsync(TargetType, TargetValue, cancellationToken);
-            Notice = removed ? "Decision removed. The source is undecided again." : "No active decision was found.";
+            Notice = removed ? "Decision removed. The source is unreviewed again." : "No active decision was found.";
         }
         catch (ClusterDecisionValidationException exception)
         {
@@ -195,15 +209,17 @@ public sealed class IndexModel(
         };
     }
 
-    private DateOnly ResolveDecisionCutoff()
+    private ResolvedDecisionCutoff ResolveDecisionCutoff()
     {
         var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
         return DecisionCutoffPreset?.ToLowerInvariant() switch
         {
-            "30" => today.AddDays(-30),
-            "90" => today.AddDays(-90),
-            "365" => today.AddYears(-1),
-            "custom" when CustomCutoff is not null => DateOnly.FromDateTime(CustomCutoff.Value),
+            "existing" => new ResolvedDecisionCutoff(null, true),
+            "30" => new ResolvedDecisionCutoff(today.AddDays(-30), false),
+            "90" => new ResolvedDecisionCutoff(today.AddDays(-90), false),
+            "365" => new ResolvedDecisionCutoff(today.AddYears(-1), false),
+            "custom" when CustomCutoff is not null =>
+                new ResolvedDecisionCutoff(DateOnly.FromDateTime(CustomCutoff.Value), false),
             _ => throw new ClusterDecisionValidationException("Choose a cutoff preset or custom date.")
         };
     }
@@ -212,4 +228,11 @@ public sealed class IndexModel(
         !string.IsNullOrWhiteSpace(ReturnUrl) && Url.IsLocalUrl(ReturnUrl)
             ? LocalRedirect(ReturnUrl)
             : RedirectToPage();
+
+    private bool HasInvalidInput(params string[] propertyNames) =>
+        propertyNames.Any(propertyName =>
+            ModelState.TryGetValue(propertyName, out var entry) &&
+            entry.ValidationState == ModelValidationState.Invalid);
+
+    private sealed record ResolvedDecisionCutoff(DateOnly? CutoffDate, bool PreserveExisting);
 }

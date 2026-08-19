@@ -832,8 +832,9 @@ Allow the user to make high-leverage decisions on the largest sender/list cluste
 - Keep / Protect;
 - Unwanted — Existing + Future;
 - Clean Existing Only;
-- Clean Older Than with 30-day, 90-day, one-year, and custom-date cutoffs;
-- Defer as non-policy review bookkeeping;
+- Clean Older Than with an explicit stored cutoff and 30-day, 90-day, one-year, and custom-date shortcuts;
+- Defer as reviewed, non-policy bookkeeping that leaves the active unreviewed queue;
+- separate review progress from policy coverage and filtering;
 - editable and removable exact-cluster decisions;
 - append-only decision revision history;
 - deterministic local policy persistence and live coverage calculations.

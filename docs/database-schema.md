@@ -131,7 +131,7 @@ The relationship is derived, not a foreign key: Gmail threads can span multiple 
 | `CreatedAtUtc` | No | Initial decision timestamp |
 | `UpdatedAtUtc` | No | Most recent revision timestamp; also bounds `CleanExistingOnly` against later mail |
 
-`(TargetType, TargetValue)` is unique. Sender targets apply only to messages without a List-ID, matching the census fallback rule. Domain targets do not exist.
+`(TargetType, TargetValue)` is unique. Sender targets apply only to messages without a List-ID, matching the census fallback rule. Domain targets do not exist. Any active row marks the source reviewed; an active `Defer` row has no policy coverage. Age shortcuts are UI conveniences only—the durable rule always stores the resolved explicit `CutoffDateUtc`.
 
 ## `ClusterDecisionAudits`
 

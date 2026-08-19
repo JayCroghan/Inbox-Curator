@@ -20,7 +20,9 @@ Persist one current `ClusterDecision` per exact normalized target:
 
 Every create, replacement, and removal appends a `ClusterDecisionAudit` snapshot containing the revision, decision, cutoff, future-policy flag, active state, timestamp, and matching-message count. Removing a decision deactivates the current record rather than deleting its history.
 
-`KeepProtect` and `UnwantedExistingAndFuture` apply to future mail. `CleanExistingOnly`, `CleanOlderThan`, and `Defer` do not. A cutoff is required only for `CleanOlderThan`. `Defer` is retained as review-queue bookkeeping but contributes no policy coverage.
+`KeepProtect` and `UnwantedExistingAndFuture` apply to future mail. `CleanExistingOnly`, `CleanOlderThan`, and `Defer` do not. A cutoff is required only for `CleanOlderThan`. Review state and policy state are separate: any active decision, including `Defer`, marks a source reviewed; only a non-Defer decision supplies policy. Deferred sources therefore leave the unreviewed queue while contributing no policy coverage.
+
+Age-rule controls always render the persisted cutoff as an explicit `Clean before <date>` value. Reopening an existing rule defaults to preserving that stored cutoff. A 30-day, 90-day, one-year, or custom shortcut deliberately resolves to and stores a replacement explicit date; the server accepts a preserve request only when the target already has an active age rule.
 
 Coverage is calculated against current local metadata. Keep/protect and unwanted-existing-and-future cover every matching message. Clean-existing-only covers messages dated at or before that decision revision, so later mail remains outside the rule. Clean-older-than covers only messages before its cutoff. Explicit decisions remain visible even when relationship evidence exists.
 
