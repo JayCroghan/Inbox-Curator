@@ -1,0 +1,97 @@
+@page
+@model InboxCurator.Pages.Clusters.DetailModel
+@{
+    ViewData["Title"] = $"{Model.Result.Display} · cluster detail";
+}
+
+<div class="workspace cluster-workspace">
+    <nav class="detail-nav" aria-label="Cluster navigation">
+        <a href="@Model.BackUrl">← Back to triage</a>
+        <span>Local metadata only · no Gmail request</span>
+    </nav>
+
+    @if (!string.IsNullOrEmpty(Model.Notice))
+    {
+        <div class="notice" role="status">@Model.Notice</div>
+    }
+
+    <section class="cluster-heading" aria-labelledby="cluster-title">
+        <div>
+            <p class="eyebrow">@ClusterDecisionPresentation.TargetLabel(Model.Result.TargetType) · exact cluster</p>
+            <h1 id="cluster-title">@Model.Result.Display</h1>
+            <p class="heading-note">@Model.Result.TargetValue</p>
+        </div>
+        <div class="detail-decision">
+            @await Html.PartialAsync("_DecisionControls", new DecisionControlsModel(
+                Model.Result.TargetType,
+                Model.Result.TargetValue,
+                Model.Result.Decision?.DecisionKind,
+                Model.Result.Decision?.CutoffDateUtc,
+                Model.Result.Decision?.AffectedMessageCount ?? 0,
+                Model.CurrentUrl))
+            @if (Model.Result.Decision is not null)
+            {
+                <p>Revision @Model.Result.Decision.Revision · updated @Model.Result.Decision.UpdatedAtUtc.ToString("dd MMM yyyy, HH:mm") UTC</p>
+            }
+        </div>
+    </section>
+
+    <section class="cluster-evidence" aria-label="Cluster evidence">
+        <div><span>Messages</span><strong>@Model.Result.Evidence.MessageCount.ToString("N0")</strong></div>
+        <div><span>First received</span><strong>@Model.Result.Evidence.FirstDateUtc.ToString("dd MMM yy")</strong></div>
+        <div><span>Last received</span><strong>@Model.Result.Evidence.LastDateUtc.ToString("dd MMM yy")</strong></div>
+        <div><span>Unread</span><strong>@Model.Result.Evidence.UnreadCount.ToString("N0")</strong></div>
+        <div><span>Starred</span><strong>@Model.Result.Evidence.StarredCount.ToString("N0")</strong></div>
+        <div><span>Important</span><strong>@Model.Result.Evidence.ImportantCount.ToString("N0")</strong></div>
+        <div><span>Promotions</span><strong>@Model.Result.Evidence.PromotionPercentage.ToString("0")%</strong></div>
+        <div><span>Relationship signals</span><strong>@Model.Result.Evidence.RelationshipCount.ToString("N0")</strong></div>
+    </section>
+
+    <section class="message-ledger" aria-labelledby="message-title">
+        <div class="census-toolbar">
+            <div>
+                <p class="eyebrow">Stored evidence</p>
+                <h2 id="message-title">Matching messages</h2>
+            </div>
+            <p class="toolbar-note">Subjects and Gmail-derived flags already present in SQLite. Bodies are never loaded.</p>
+        </div>
+        <div class="table-shell">
+            <table class="message-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Subject</th>
+                        <th>Unread</th>
+                        <th>Starred</th>
+                        <th>Important</th>
+                        <th>Promotion</th>
+                        <th>Direct</th>
+                        <th>Thread</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var message in Model.Result.Messages)
+                    {
+                        <tr>
+                            <td><time datetime="@message.DateUtc.ToString("O")">@message.DateUtc.ToString("dd MMM yy, HH:mm")</time></td>
+                            <td class="message-subject">@(string.IsNullOrWhiteSpace(message.Subject) ? "(No subject)" : message.Subject)</td>
+                            <td>@(message.IsUnread ? "Yes" : "—")</td>
+                            <td>@(message.IsStarred ? "Yes" : "—")</td>
+                            <td>@(message.IsImportant ? "Yes" : "—")</td>
+                            <td>@(message.IsPromotion ? "Yes" : "—")</td>
+                            <td>@(message.HasDirectCorrespondence ? "Yes" : "—")</td>
+                            <td>@(message.HasThreadInteraction ? "Yes" : "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <nav class="pagination" aria-label="Message pages">
+            <span>Page @Model.Result.Page of @Model.Result.TotalPages · @Model.Result.Evidence.MessageCount.ToString("N0") messages</span>
+            <div>
+                <a class="@(Model.Result.Page <= 1 ? "is-disabled" : "")" asp-route-targetType="@Model.Result.TargetType" asp-route-targetValue="@Model.Result.TargetValue" asp-route-returnUrl="@Model.ReturnUrl" asp-route-pageNumber="@(Model.Result.Page - 1)" asp-route-pageSize="@Model.Result.PageSize" aria-disabled="@(Model.Result.Page <= 1)">← Previous</a>
+                <a class="@(Model.Result.Page >= Model.Result.TotalPages ? "is-disabled" : "")" asp-route-targetType="@Model.Result.TargetType" asp-route-targetValue="@Model.Result.TargetValue" asp-route-returnUrl="@Model.ReturnUrl" asp-route-pageNumber="@(Model.Result.Page + 1)" asp-route-pageSize="@Model.Result.PageSize" aria-disabled="@(Model.Result.Page >= Model.Result.TotalPages)">Next →</a>
+            </div>
+        </nav>
+    </section>
+</div>

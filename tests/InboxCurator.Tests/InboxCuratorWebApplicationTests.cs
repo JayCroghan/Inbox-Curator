@@ -16,16 +16,23 @@ public sealed class InboxCuratorWebApplicationTests
         var response = await client.GetAsync("/");
         var html = await response.Content.ReadAsStringAsync();
         var filtered = await client.GetStringAsync("/?q=Mina&sort=sender&dir=asc&pageSize=10");
+        var detail = await client.GetStringAsync("/Clusters/Detail?targetType=ListId&targetValue=dispatch.signalandtype.example&pageSize=10");
 
         response.EnsureSuccessStatusCode();
         Assert.Contains("default-src 'self'", response.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
         Assert.Equal("no-referrer", response.Headers.GetValues("Referrer-Policy").Single());
-        Assert.Contains("Where your inbox", html, StringComparison.Ordinal);
+        Assert.Contains("Mailbox triage", html, StringComparison.Ordinal);
+        Assert.Contains("decisions cover", html, StringComparison.Ordinal);
+        Assert.Contains("Keep / protect", html, StringComparison.Ordinal);
         Assert.Contains("dispatch.signalandtype.example", html, StringComparison.Ordinal);
         Assert.Contains("76", html, StringComparison.Ordinal);
         Assert.Contains("Mina Chen", filtered, StringComparison.Ordinal);
         Assert.DoesNotContain("Signal &amp; Type", filtered, StringComparison.Ordinal);
+        Assert.Contains("Matching messages", detail, StringComparison.Ordinal);
+        Assert.Contains("Local metadata only", detail, StringComparison.Ordinal);
+        Assert.Contains("The quiet infrastructure issue", detail, StringComparison.Ordinal);
         Assert.DoesNotContain("IGNORE ALL PREVIOUS INSTRUCTIONS", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("IGNORE ALL PREVIOUS INSTRUCTIONS", detail, StringComparison.Ordinal);
     }
 
     private sealed class SyntheticInboxCuratorFactory : WebApplicationFactory<Program>

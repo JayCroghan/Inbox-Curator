@@ -7,6 +7,8 @@ public sealed class InboxCuratorDbContext(DbContextOptions<InboxCuratorDbContext
     public DbSet<MessageRecord> Messages => Set<MessageRecord>();
     public DbSet<SentInteraction> SentInteractions => Set<SentInteraction>();
     public DbSet<ScanCheckpoint> ScanCheckpoints => Set<ScanCheckpoint>();
+    public DbSet<ClusterDecision> ClusterDecisions => Set<ClusterDecision>();
+    public DbSet<ClusterDecisionAudit> ClusterDecisionAudits => Set<ClusterDecisionAudit>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -49,5 +51,26 @@ public sealed class InboxCuratorDbContext(DbContextOptions<InboxCuratorDbContext
         checkpoints.Property(checkpoint => checkpoint.NextPageToken).HasMaxLength(2048);
         checkpoints.Property(checkpoint => checkpoint.FailureCode).HasMaxLength(128);
         checkpoints.Property(checkpoint => checkpoint.ActiveRunId).HasMaxLength(32);
+
+        var decisions = modelBuilder.Entity<ClusterDecision>();
+        decisions.ToTable("ClusterDecisions");
+        decisions.HasKey(decision => decision.Id);
+        decisions.HasIndex(decision => new { decision.TargetType, decision.TargetValue }).IsUnique();
+        decisions.HasIndex(decision => decision.GroupKey);
+        decisions.Property(decision => decision.TargetType).HasConversion<string>().HasMaxLength(16);
+        decisions.Property(decision => decision.TargetValue).HasMaxLength(512);
+        decisions.Property(decision => decision.GroupKey).HasMaxLength(600);
+        decisions.Property(decision => decision.DecisionKind).HasConversion<string>().HasMaxLength(40);
+
+        var decisionAudits = modelBuilder.Entity<ClusterDecisionAudit>();
+        decisionAudits.ToTable("ClusterDecisionAudits");
+        decisionAudits.HasKey(audit => audit.Id);
+        decisionAudits.HasIndex(audit => new { audit.ClusterDecisionId, audit.Revision }).IsUnique();
+        decisionAudits.Property(audit => audit.ChangeKind).HasConversion<string>().HasMaxLength(16);
+        decisionAudits.Property(audit => audit.DecisionKind).HasConversion<string>().HasMaxLength(40);
+        decisionAudits.HasOne(audit => audit.ClusterDecision)
+            .WithMany(decision => decision.AuditEntries)
+            .HasForeignKey(audit => audit.ClusterDecisionId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

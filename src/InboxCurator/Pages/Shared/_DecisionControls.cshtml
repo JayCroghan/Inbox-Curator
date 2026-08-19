@@ -1,0 +1,58 @@
+@model DecisionControlsModel
+@{
+    var label = Model.DecisionKind is null
+        ? "Undecided"
+        : ClusterDecisionPresentation.Label(Model.DecisionKind.Value);
+    var cutoffValue = Model.CutoffDateUtc?.ToString("yyyy-MM-dd");
+}
+<details class="decision-controls">
+    <summary class="decision-status @ClusterDecisionPresentation.CssClass(Model.DecisionKind)">
+        <span>@label</span>
+        @if (Model.DecisionKind is not null && Model.DecisionKind != ClusterDecisionKind.Defer)
+        {
+            <small>@Model.AffectedMessageCount.ToString("N0") affected</small>
+        }
+    </summary>
+    <div class="decision-popover">
+        <p>Exact @ClusterDecisionPresentation.TargetLabel(Model.TargetType) policy</p>
+        <form method="post" asp-page="/Index" asp-page-handler="Decide" class="decision-actions">
+            <input type="hidden" name="TargetType" value="@Model.TargetType" />
+            <input type="hidden" name="TargetValue" value="@Model.TargetValue" />
+            <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
+            <button type="submit" name="Decision" value="KeepProtect">Keep / protect</button>
+            <button type="submit" name="Decision" value="UnwantedExistingAndFuture">Unwanted · existing + future</button>
+            <button type="submit" name="Decision" value="CleanExistingOnly">Clean existing only</button>
+            <button type="submit" name="Decision" value="Defer">Defer</button>
+        </form>
+        <form method="post" asp-page="/Index" asp-page-handler="Decide" class="age-rule-form">
+            <input type="hidden" name="TargetType" value="@Model.TargetType" />
+            <input type="hidden" name="TargetValue" value="@Model.TargetValue" />
+            <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
+            <input type="hidden" name="Decision" value="CleanOlderThan" />
+            <label>
+                <span>Clean older than</span>
+                <select name="DecisionCutoffPreset">
+                    <option value="30">30 days</option>
+                    <option value="90" selected>90 days</option>
+                    <option value="365">1 year</option>
+                    <option value="custom">Custom date</option>
+                </select>
+            </label>
+            <label>
+                <span>Custom cutoff</span>
+                <input type="date" name="CustomCutoff" value="@cutoffValue" />
+            </label>
+            <button type="submit">Set age rule</button>
+        </form>
+        @if (Model.DecisionKind is not null)
+        {
+            <form method="post" asp-page="/Index" asp-page-handler="RemoveDecision" class="remove-decision-form">
+                <input type="hidden" name="TargetType" value="@Model.TargetType" />
+                <input type="hidden" name="TargetValue" value="@Model.TargetValue" />
+                <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
+                <button type="submit">Remove current decision</button>
+            </form>
+        }
+        <small>No Gmail changes occur. This records local intent only.</small>
+    </div>
+</details>
