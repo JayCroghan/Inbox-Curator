@@ -4,14 +4,14 @@
 - Target: .NET 10 (`net10.0`)
 - Test runner: xUnit through Microsoft.NET.Test.Sdk
 - Collector: coverlet XPlat Code Coverage (Cobertura)
-- Result: **18 passed, 0 failed, 0 skipped**
+- Result: **21 passed, 0 failed, 0 skipped**
 
 ## Coverage
 
 | Metric | Covered | Valid | Rate |
 | --- | ---: | ---: | ---: |
-| Lines | 1,000 | 1,257 | **79.55%** |
-| Branches | 285 | 452 | **63.05%** |
+| Lines | 1,037 | 1,296 | **80.01%** |
+| Branches | 291 | 460 | **63.26%** |
 
 The denominator includes generated Razor Page classes and source-generated regular-expression code. Gmail's live installed-app/browser authorization and real network transport are deliberately not exercised by the offline suite; the OAuth scope, transient-status classification, delay curve, metadata mapping, and scanner behavior are tested at their local boundaries.
 
@@ -26,6 +26,7 @@ The denominator includes generated Razor Page classes and source-generated regul
 - Sent address/thread relationship reconciliation
 - Idempotent replay and stale-row pruning after a completed rescan
 - Failure checkpoint and resume from the last durable page token
+- Bounded concurrent page fetching, including the configured limit, the 32-worker clamp, sibling cancellation, and failed-page replay
 - Dashboard aggregation, representative subjects, search, sort, and paging
 - EF Core migration/startup, synthetic seeding, Razor rendering, and response security headers
 
