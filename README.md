@@ -1,6 +1,6 @@
 # InboxCurator
 
-InboxCurator is a local, read-only Gmail census. It scans one mailbox, groups received messages by `List-ID` (falling back to normalized sender), and shows which sources account for mailbox volume. A separate Sent scan identifies addresses and threads the user has interacted with.
+InboxCurator is a local, read-only Gmail census and human triage workspace. It scans one mailbox, groups received messages by `List-ID` (falling back to normalized sender), and lets the user persist exact-cluster seed policy locally. A separate Sent scan identifies addresses and threads the user has interacted with.
 
 The application is an ASP.NET Core Razor Pages app targeting .NET 10. It binds only to `127.0.0.1`, stores metadata in SQLite, and never persists email bodies, HTML, attachment content, or OAuth tokens in the database.
 
@@ -15,6 +15,7 @@ The application is an ASP.NET Core Razor Pages app targeting .NET 10. It binds o
 - Each message is fetched as metadata with selected headers first.
 - Attachment detection uses a subsequent partial response containing MIME filenames and attachment IDs only. Body data is excluded, and the attachment endpoint is never called.
 - Logs contain scan state, counts, retry timing, and sanitized failure codes—not OAuth tokens, headers, addresses, subjects, or body content.
+- Human decisions record local future intent only. No decision handler calls Gmail or changes mailbox state.
 - The project makes no LLM, MCP, OpenClaw, or other AI call. The adversarial email fixture is inert test corpus for future work.
 
 See [ADR 0001](docs/adr/0001-read-only-privacy-boundary.md) for the enforced privacy boundary.
@@ -57,6 +58,22 @@ Open [http://127.0.0.1:5137](http://127.0.0.1:5137). EF Core applies pending mig
 
 Press **Scan Gmail** to queue a scan. Scanning runs in a hosted background service. Sent metadata is indexed first, then received-message metadata; relationship flags are reconciled after both passes.
 
+### Human triage
+
+The default dashboard puts truly unreviewed clusters first and orders them by message volume. An exact normalized List-ID or fallback sender can be marked:
+
+- **Keep / Protect**;
+- **Unwanted — Existing + Future**;
+- **Clean Existing Only**;
+- **Clean Older Than** an explicit cutoff selected through 30-day, 90-day, one-year, or custom-date shortcuts;
+- **Defer** to mark the source reviewed without adding policy coverage.
+
+Decisions are editable and removable. Current state and append-only revision history are stored in SQLite. The dashboard separates review progress from policy coverage: Deferred sources leave the Unreviewed queue but remain outside policy filters and coverage. Existing age rules always display their exact persisted cutoff and preserve it unless the user deliberately chooses a replacement. Coverage metrics are recalculated from current local message metadata immediately; relationship evidence remains visible but never blocks an explicit human decision. Cluster detail pages display paged subjects and flags already in SQLite and do not make Gmail API calls.
+
+![Synthetic MAIL-002 triage dashboard](docs/screenshots/mail-002-triage-dashboard.png)
+
+![Synthetic MAIL-002 cluster detail](docs/screenshots/mail-002-cluster-detail.png)
+
 ### Configuration
 
 | Key | Default | Purpose |
@@ -81,7 +98,7 @@ This starts against a separate demo database and does not need Gmail credentials
 dotnet run --project src/InboxCurator/InboxCurator.csproj -- --SeedSyntheticData=true "--ConnectionStrings:InboxCurator=Data Source=storage/demo.db"
 ```
 
-The committed [overview](docs/screenshots/dashboard-overview.jpg) and [census table](docs/screenshots/dashboard-census.jpg) screenshots use only these synthetic records.
+The committed [MAIL-002 triage dashboard](docs/screenshots/mail-002-triage-dashboard.png), [cluster detail](docs/screenshots/mail-002-cluster-detail.png), [overview](docs/screenshots/dashboard-overview.jpg), and [census table](docs/screenshots/dashboard-census.jpg) screenshots use only these synthetic records.
 
 ## Test and coverage
 

@@ -1,20 +1,21 @@
 @page
 @model IndexModel
 @{
-    ViewData["Title"] = "Mailbox census";
+    ViewData["Title"] = "Mailbox triage";
     var lastCompleted = Model.Result.Checkpoints
         .Where(checkpoint => checkpoint.CompletedAtUtc.HasValue)
         .OrderByDescending(checkpoint => checkpoint.CompletedAtUtc)
         .FirstOrDefault();
     var anyFailed = Model.Result.Checkpoints.Any(checkpoint => checkpoint.State == ScanState.Failed);
+    var lastBeforeValue = Model.LastBefore?.ToString("yyyy-MM-dd");
 }
 
 <div class="workspace" data-scan-running="@Model.ScanIsRunning.ToString().ToLowerInvariant()">
-    <section class="workspace-heading" aria-labelledby="page-title">
+    <section class="workspace-heading triage-heading" aria-labelledby="page-title">
         <div>
-            <p class="eyebrow">Single-mailbox census</p>
-            <h1 id="page-title">Where your inbox<br />really comes from.</h1>
-            <p class="heading-note">Received mail grouped by List-ID, then normalized sender. Sent mail contributes relationship signals only.</p>
+            <p class="eyebrow">Human seed policy · local only</p>
+            <h1 id="page-title">Mailbox triage</h1>
+            <p class="heading-note">Decide at the sender or List-ID level. Every choice is stored locally as future policy intent; Gmail remains unchanged.</p>
         </div>
         <div class="scan-console">
             <div class="scan-state">
@@ -38,13 +39,9 @@
                 </div>
             </div>
             <form method="post" asp-page-handler="Scan">
-                <input type="hidden" name="q" value="@Model.Search" />
-                <input type="hidden" name="sort" value="@Model.Sort" />
-                <input type="hidden" name="dir" value="@Model.Direction" />
-                <input type="hidden" name="pageNumber" value="@Model.Result.Page" />
-                <input type="hidden" name="pageSize" value="@Model.Result.PageSize" />
+                <input type="hidden" name="ReturnUrl" value="@Model.CurrentUrl" />
                 <button class="scan-button" type="submit" disabled="@Model.ScanIsRunning">
-                    <span>@(Model.ScanIsRunning ? "Scanning…" : "Scan Gmail")</span>
+                    <span>@(Model.ScanIsRunning ? "Scanning…" : "Refresh census")</span>
                     <span aria-hidden="true">↗</span>
                 </button>
             </form>
@@ -56,66 +53,138 @@
         <div class="notice" role="status">@Model.Notice</div>
     }
 
-    <section class="metrics" aria-label="Census summary">
-        <div><span>Indexed messages</span><strong>@Model.Result.Metrics.MessageCount.ToString("N0")</strong></div>
-        <div><span>Sources</span><strong>@Model.Result.Metrics.GroupCount.ToString("N0")</strong></div>
-        <div><span>Unread</span><strong>@Model.Result.Metrics.UnreadCount.ToString("N0")</strong></div>
-        <div><span>Known relationships</span><strong>@Model.Result.Metrics.RelationshipCount.ToString("N0")</strong></div>
+    <section class="metrics triage-metrics" aria-label="Mailbox decision summary">
+        <div><span>Total messages</span><strong>@Model.Result.Metrics.MessageCount.ToString("N0")</strong></div>
+        <div><span>Total sources</span><strong>@Model.Result.Metrics.GroupCount.ToString("N0")</strong></div>
+        <div><span>Unreviewed sources</span><strong>@Model.Result.Metrics.UnreviewedGroupCount.ToString("N0")</strong></div>
+        <div><span>Messages with explicit policy</span><strong>@Model.Result.Metrics.CoveredMessageCount.ToString("N0")</strong></div>
+        <div><span>Kept / protected</span><strong>@Model.Result.Metrics.KeptMessageCount.ToString("N0")</strong></div>
+        <div><span>Intended quarantine</span><strong>@Model.Result.Metrics.IntendedQuarantineMessageCount.ToString("N0")</strong></div>
+        <div><span>Age-rule affected</span><strong>@Model.Result.Metrics.AgeRuleAffectedMessageCount.ToString("N0")</strong></div>
+        <div><span>Mailbox policy coverage</span><strong>@Model.Result.Metrics.PolicyCoveragePercentage.ToString("0.0")%</strong></div>
     </section>
 
-    <section class="census" aria-labelledby="census-title">
+    <section class="decision-progress" aria-label="Decision progress">
+        <strong>@Model.Result.Metrics.ReviewedGroupCount.ToString("N0") sources reviewed · @Model.Result.Metrics.UnreviewedGroupCount.ToString("N0") remaining.</strong>
+        <span>@Model.Result.Metrics.PolicyDecisionCount.ToString("N0") explicit policies cover @Model.Result.Metrics.CoveredMessageCount.ToString("N0") messages (@Model.Result.Metrics.PolicyCoveragePercentage.ToString("0.0")%) · deferred review contributes no policy coverage</span>
+        <progress max="100" value="@Model.Result.Metrics.ReviewPercentage.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)">@Model.Result.Metrics.ReviewPercentage.ToString("0.0")% reviewed</progress>
+    </section>
+
+    <section class="census triage-ledger" aria-labelledby="census-title">
         <div class="census-toolbar">
             <div>
-                <p class="eyebrow">Volume by source</p>
-                <h2 id="census-title">Mailbox census</h2>
+                <p class="eyebrow">Highest leverage first</p>
+                <h2 id="census-title">Source decisions</h2>
             </div>
-            <form method="get" class="filters" role="search">
-                <label>
-                    <span class="visually-hidden">Search sources or subjects</span>
-                    <input type="search" name="q" value="@Model.Search" placeholder="Search sender, list or subject" />
-                </label>
-                <input type="hidden" name="sort" value="@Model.Sort" />
-                <input type="hidden" name="dir" value="@Model.Direction" />
-                <label class="page-size">
-                    <span>Rows</span>
-                    <select name="pageSize" data-auto-submit>
-                        @foreach (var size in new[] { 10, 25, 50 })
-                        {
-                            <option value="@size" selected="@(Model.Result.PageSize == size)">@size</option>
-                        }
-                    </select>
-                </label>
-                <button type="submit">Search</button>
-            </form>
+            <p class="toolbar-note">Default order places unreviewed clusters first, then sorts by message volume.</p>
         </div>
 
+        <form method="get" class="triage-filters" role="search">
+            <label class="search-filter">
+                <span>Search</span>
+                <input type="search" name="q" value="@Model.Search" placeholder="Sender, List-ID or subject" />
+            </label>
+            <label>
+                <span>Decision</span>
+                <select name="decisionState" data-auto-submit>
+                    <option value="all" selected="@(Model.DecisionState == "all")">All · unreviewed first</option>
+                    <option value="unreviewed" selected="@(Model.DecisionState == "unreviewed")">Unreviewed</option>
+                    <option value="policy" selected="@(Model.DecisionState == "policy")">Policy decided</option>
+                    <option value="deferred" selected="@(Model.DecisionState == "deferred")">Deferred</option>
+                </select>
+            </label>
+            <label>
+                <span>Relationship</span>
+                <select name="relationship" data-auto-submit>
+                    <option value="all" selected="@(Model.Relationship == "all")">Any</option>
+                    <option value="known" selected="@(Model.Relationship == "known")">Known relationship</option>
+                    <option value="none" selected="@(Model.Relationship == "none")">No relationship</option>
+                </select>
+            </label>
+            <label>
+                <span>Category</span>
+                <select name="promotion" data-auto-submit>
+                    <option value="all" selected="@(Model.Promotion == "all")">Any</option>
+                    <option value="promotions" selected="@(Model.Promotion == "promotions")">Promotions</option>
+                    <option value="non-promotions" selected="@(Model.Promotion == "non-promotions")">Non-promotions</option>
+                </select>
+            </label>
+            <label>
+                <span>Grouping</span>
+                <select name="kind" data-auto-submit>
+                    <option value="all" selected="@(Model.Kind == "all")">List-ID + sender</option>
+                    <option value="list" selected="@(Model.Kind == "list")">List-ID</option>
+                    <option value="sender" selected="@(Model.Kind == "sender")">Sender</option>
+                </select>
+            </label>
+            <label>
+                <span>Last received before</span>
+                <select name="stalePreset" data-auto-submit>
+                    <option value="all" selected="@(Model.StalePreset == "all")">Any time</option>
+                    <option value="30" selected="@(Model.StalePreset == "30")">30 days ago</option>
+                    <option value="90" selected="@(Model.StalePreset == "90")">90 days ago</option>
+                    <option value="365" selected="@(Model.StalePreset == "365")">1 year ago</option>
+                    <option value="custom" selected="@(Model.StalePreset == "custom")">Custom date</option>
+                </select>
+            </label>
+            <label>
+                <span>Custom stale date</span>
+                <input type="date" name="lastBefore" value="@lastBeforeValue" />
+            </label>
+            <label class="page-size">
+                <span>Rows</span>
+                <select name="pageSize" data-auto-submit>
+                    @foreach (var size in new[] { 10, 25, 50, 100 })
+                    {
+                        <option value="@size" selected="@(Model.Result.PageSize == size)">@size</option>
+                    }
+                </select>
+            </label>
+            <input type="hidden" name="sort" value="@Model.Sort" />
+            <input type="hidden" name="dir" value="@Model.Direction" />
+            <input type="hidden" name="pageNumber" value="1" />
+            <button type="submit">Apply</button>
+        </form>
+
         <div class="table-shell">
-            <table>
+            <table class="triage-table">
                 <thead>
                     <tr>
-                        <th class="source-column"><a asp-route-q="@Model.Search" asp-route-sort="sender" asp-route-dir="@Model.NextDirection("sender")" asp-route-pageSize="@Model.Result.PageSize">Sender / list <span>@Model.SortIndicator("sender")</span></a></th>
-                        <th class="numeric"><a asp-route-q="@Model.Search" asp-route-sort="count" asp-route-dir="@Model.NextDirection("count")" asp-route-pageSize="@Model.Result.PageSize">Messages <span>@Model.SortIndicator("count")</span></a></th>
-                        <th><a asp-route-q="@Model.Search" asp-route-sort="first" asp-route-dir="@Model.NextDirection("first")" asp-route-pageSize="@Model.Result.PageSize">First <span>@Model.SortIndicator("first")</span></a></th>
-                        <th><a asp-route-q="@Model.Search" asp-route-sort="last" asp-route-dir="@Model.NextDirection("last")" asp-route-pageSize="@Model.Result.PageSize">Last <span>@Model.SortIndicator("last")</span></a></th>
-                        <th class="numeric"><a asp-route-q="@Model.Search" asp-route-sort="unread" asp-route-dir="@Model.NextDirection("unread")" asp-route-pageSize="@Model.Result.PageSize">Unread <span>@Model.SortIndicator("unread")</span></a></th>
-                        <th class="numeric"><a asp-route-q="@Model.Search" asp-route-sort="starred" asp-route-dir="@Model.NextDirection("starred")" asp-route-pageSize="@Model.Result.PageSize">Starred <span>@Model.SortIndicator("starred")</span></a></th>
-                        <th class="numeric"><a asp-route-q="@Model.Search" asp-route-sort="important" asp-route-dir="@Model.NextDirection("important")" asp-route-pageSize="@Model.Result.PageSize">Important <span>@Model.SortIndicator("important")</span></a></th>
-                        <th class="numeric"><a asp-route-q="@Model.Search" asp-route-sort="relationship" asp-route-dir="@Model.NextDirection("relationship")" asp-route-pageSize="@Model.Result.PageSize">Related <span>@Model.SortIndicator("relationship")</span></a></th>
-                        <th><a asp-route-q="@Model.Search" asp-route-sort="promotion" asp-route-dir="@Model.NextDirection("promotion")" asp-route-pageSize="@Model.Result.PageSize">Promotions <span>@Model.SortIndicator("promotion")</span></a></th>
+                        <th class="source-column"><a asp-all-route-data='@Model.RouteValues("sender", Model.NextDirection("sender"), 1)'>Sender / list <span>@Model.SortIndicator("sender")</span></a></th>
+                        <th class="decision-column">Human decision</th>
+                        <th class="numeric"><a asp-all-route-data='@Model.RouteValues("count", Model.NextDirection("count"), 1)'>Messages <span>@Model.SortIndicator("count")</span></a></th>
+                        <th><a asp-all-route-data='@Model.RouteValues("first", Model.NextDirection("first"), 1)'>First <span>@Model.SortIndicator("first")</span></a></th>
+                        <th><a asp-all-route-data='@Model.RouteValues("last", Model.NextDirection("last"), 1)'>Last <span>@Model.SortIndicator("last")</span></a></th>
+                        <th class="numeric"><a asp-all-route-data='@Model.RouteValues("unread", Model.NextDirection("unread"), 1)'>Unread <span>@Model.SortIndicator("unread")</span></a></th>
+                        <th class="numeric"><a asp-all-route-data='@Model.RouteValues("starred", Model.NextDirection("starred"), 1)'>Starred <span>@Model.SortIndicator("starred")</span></a></th>
+                        <th class="numeric"><a asp-all-route-data='@Model.RouteValues("important", Model.NextDirection("important"), 1)'>Important <span>@Model.SortIndicator("important")</span></a></th>
+                        <th class="numeric"><a asp-all-route-data='@Model.RouteValues("relationship", Model.NextDirection("relationship"), 1)'>Related <span>@Model.SortIndicator("relationship")</span></a></th>
+                        <th><a asp-all-route-data='@Model.RouteValues("promotion", Model.NextDirection("promotion"), 1)'>Promotions <span>@Model.SortIndicator("promotion")</span></a></th>
                         <th class="subjects-column">Representative subjects</th>
                     </tr>
                 </thead>
                 <tbody>
                     @if (Model.Result.Groups.Count == 0)
                     {
-                        <tr><td colspan="10" class="empty-state">No sources match this view. Run a scan or adjust the search.</td></tr>
+                        <tr><td colspan="11" class="empty-state">No sources match these triage filters.</td></tr>
                     }
                     @foreach (var group in Model.Result.Groups)
                     {
-                        <tr>
+                        <tr class="@(group.HasHumanDecision ? "is-reviewed-row" : "")">
                             <td class="source-cell">
-                                <strong>@group.Display</strong>
-                                <span>@group.Kind · @group.GroupKey[(group.GroupKey.IndexOf(':') + 1)..]</span>
+                                <a class="source-link" asp-page="/Clusters/Detail" asp-route-targetType="@group.TargetType" asp-route-targetValue="@group.TargetValue" asp-route-returnUrl="@Model.CurrentUrl">
+                                    <strong>@group.Display</strong>
+                                    <span>@group.Kind · @group.TargetValue</span>
+                                </a>
+                            </td>
+                            <td>
+                                @await Html.PartialAsync("_DecisionControls", new DecisionControlsModel(
+                                    group.TargetType,
+                                    group.TargetValue,
+                                    group.DecisionKind,
+                                    group.DecisionCutoffDateUtc,
+                                    group.AffectedMessageCount,
+                                    Model.CurrentUrl))
                             </td>
                             <td class="numeric count-cell">@group.MessageCount.ToString("N0")</td>
                             <td><time datetime="@group.FirstDateUtc.ToString("O")">@group.FirstDateUtc.ToString("dd MMM yy")</time></td>
@@ -144,11 +213,11 @@
             </table>
         </div>
 
-        <nav class="pagination" aria-label="Census pages">
-            <span>Showing page @Model.Result.Page of @Model.Result.TotalPages · @Model.Result.TotalGroups sources</span>
+        <nav class="pagination" aria-label="Triage pages">
+            <span>Page @Model.Result.Page of @Model.Result.TotalPages · @Model.Result.TotalGroups matching sources</span>
             <div>
-                <a class="@(Model.Result.Page <= 1 ? "is-disabled" : "")" asp-route-q="@Model.Search" asp-route-sort="@Model.Sort" asp-route-dir="@Model.Direction" asp-route-pageNumber="@(Model.Result.Page - 1)" asp-route-pageSize="@Model.Result.PageSize" aria-disabled="@(Model.Result.Page <= 1)">← Previous</a>
-                <a class="@(Model.Result.Page >= Model.Result.TotalPages ? "is-disabled" : "")" asp-route-q="@Model.Search" asp-route-sort="@Model.Sort" asp-route-dir="@Model.Direction" asp-route-pageNumber="@(Model.Result.Page + 1)" asp-route-pageSize="@Model.Result.PageSize" aria-disabled="@(Model.Result.Page >= Model.Result.TotalPages)">Next →</a>
+                <a class="@(Model.Result.Page <= 1 ? "is-disabled" : "")" asp-all-route-data='@Model.RouteValues(pageNumber: Model.Result.Page - 1)' aria-disabled="@(Model.Result.Page <= 1)">← Previous</a>
+                <a class="@(Model.Result.Page >= Model.Result.TotalPages ? "is-disabled" : "")" asp-all-route-data='@Model.RouteValues(pageNumber: Model.Result.Page + 1)' aria-disabled="@(Model.Result.Page >= Model.Result.TotalPages)">Next →</a>
             </div>
         </nav>
     </section>

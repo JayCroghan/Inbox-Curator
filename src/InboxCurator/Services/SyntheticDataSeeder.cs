@@ -69,6 +69,49 @@ public sealed class SyntheticDataSeeder(IDbContextFactory<InboxCuratorDbContext>
             new ScanCheckpoint { Kind = ScanKind.Census, State = ScanState.Completed, ProcessedCount = sequence, StartedAtUtc = now.AddMinutes(-3), UpdatedAtUtc = now, CompletedAtUtc = now },
             new ScanCheckpoint { Kind = ScanKind.Sent, State = ScanState.Completed, ProcessedCount = 12, StartedAtUtc = now.AddMinutes(-1), UpdatedAtUtc = now, CompletedAtUtc = now });
 
+        AddDecision(db, ClusterTargetType.ListId, "dispatch.signalandtype.example", ClusterDecisionKind.KeepProtect, null, now);
+        AddDecision(db, ClusterTargetType.ListId, "offers.northstarmarket.example", ClusterDecisionKind.UnwantedExistingAndFuture, null, now);
+        AddDecision(db, ClusterTargetType.ListId, "news.atlas.example", ClusterDecisionKind.CleanOlderThan, now.AddDays(-90).Date, now);
+        AddDecision(db, ClusterTargetType.Sender, "notifications@github.example", ClusterDecisionKind.Defer, null, now);
+
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void AddDecision(
+        InboxCuratorDbContext db,
+        ClusterTargetType targetType,
+        string targetValue,
+        ClusterDecisionKind decisionKind,
+        DateTime? cutoffDateUtc,
+        DateTime now)
+    {
+        var normalizedTarget = ClusterDecisionService.NormalizeTarget(targetType, targetValue);
+        var groupKey = ClusterDecisionService.GroupKey(targetType, normalizedTarget);
+        var matchingMessageCount = db.Messages.Local.Count(message => message.GroupKey == groupKey);
+        var decision = new ClusterDecision
+        {
+            TargetType = targetType,
+            TargetValue = normalizedTarget,
+            GroupKey = groupKey,
+            DecisionKind = decisionKind,
+            CutoffDateUtc = cutoffDateUtc,
+            AppliesToFuture = ClusterDecisionService.AppliesToFuture(decisionKind),
+            IsActive = true,
+            Revision = 1,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        decision.AuditEntries.Add(new ClusterDecisionAudit
+        {
+            ChangeKind = ClusterDecisionChangeKind.Created,
+            DecisionKind = decisionKind,
+            CutoffDateUtc = cutoffDateUtc,
+            AppliesToFuture = decision.AppliesToFuture,
+            IsActive = true,
+            Revision = 1,
+            MatchingMessageCount = matchingMessageCount,
+            ChangedAtUtc = now
+        });
+        db.ClusterDecisions.Add(decision);
     }
 }

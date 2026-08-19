@@ -2,8 +2,8 @@
 
 > **Status:** Active  
 > **Last updated:** 2026-08-19  
-> **Current phase:** `MAIL-001.1 — Bounded Gmail fetch concurrency`<br>
-> **Current execution:** `MAIL-001.1` implementation and verification completed on 2026-08-19.<br>
+> **Current phase:** `MAIL-002 — Human seed decisions`<br>
+> **Current execution:** `MAIL-002` implementation and verification are complete; awaiting review and merge.<br>
 > **Source of truth:** This file should be updated as design decisions or phase status change.
 
 ---
@@ -40,7 +40,9 @@ The LLM must **never** have Gmail credentials or direct Gmail mutation tools.
 
 ### Current state
 
-`MAIL-001` is implemented and verified. `MAIL-001.1` adds bounded fetch concurrency before the first real-mailbox census without broadening the completed read-only scanner's authority. Future product work should begin at `MAIL-002`.
+`MAIL-001` and `MAIL-001.1` are complete. The first real census validated cluster-first triage: 30,283 messages across 3,632 sender/List-ID sources, including 16,496 unread and 9,583 messages with relationship signals. The highest-volume 24 sources represented approximately 40.2% of indexed mail, and the largest cluster contained 5,900 messages.
+
+`MAIL-002` is the current phase. Human decisions remain exact to one normalized List-ID or fallback sender cluster. Domain-wide rules are intentionally deferred because different streams from the same brand/domain have materially different histories and may need different policies.
 
 Do **not** skip ahead to LLM classification or Gmail mutation until the read-only census is working and the real mailbox structure has been inspected.
 
@@ -760,7 +762,7 @@ OpenClaw should not receive:
 
 **Status: COMPLETE**
 
-Codex is currently implementing this phase.
+Delivered as the read-only census foundation.
 
 ### Goal
 
@@ -819,26 +821,31 @@ This is a performance-hardening step before the first real-mailbox census.
 
 ## MAIL-002 — Human Seed Decisions
 
+**Status: COMPLETE**
+
 ### Goal
 
 Allow the user to make high-leverage decisions on the largest sender/list clusters.
 
 ### Add
 
-- Keep;
-- Move;
-- Move older than N days;
-- Always Keep;
-- Always Move;
-- Defer;
-- user-authored notes/reasons if useful;
-- deterministic rule persistence.
+- Keep / Protect;
+- Unwanted — Existing + Future;
+- Clean Existing Only;
+- Clean Older Than with an explicit stored cutoff and 30-day, 90-day, one-year, and custom-date shortcuts;
+- Defer as reviewed, non-policy bookkeeping that leaves the active unreviewed queue;
+- separate review progress from policy coverage and filtering;
+- editable and removable exact-cluster decisions;
+- append-only decision revision history;
+- deterministic local policy persistence and live coverage calculations.
 
 ### Important
 
-Still run in dry-run/no-Gmail-mutation mode initially if necessary.
+Remain fully local and Gmail read-only. "Quarantine" records intended future action only; MAIL-002 never executes Gmail changes.
 
 The objective is to build a real human-labelled dataset from the user's mailbox.
+
+Do not introduce domain-wide rules in this phase. Explicit human policy has the highest presentation precedence even when a cluster has relationship/thread evidence.
 
 ---
 

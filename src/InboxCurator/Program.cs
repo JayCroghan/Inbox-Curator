@@ -21,6 +21,8 @@ builder.Services.AddSingleton<ScanCoordinator>();
 builder.Services.AddSingleton<IScanTrigger>(services => services.GetRequiredService<ScanCoordinator>());
 builder.Services.AddHostedService(services => services.GetRequiredService<ScanCoordinator>());
 builder.Services.AddScoped<DashboardQueryService>();
+builder.Services.AddScoped<ClusterDecisionService>();
+builder.Services.AddScoped<ClusterDetailQueryService>();
 builder.Services.AddScoped<SyntheticDataSeeder>();
 
 if (!builder.Environment.IsEnvironment("Testing"))
