@@ -2,8 +2,8 @@
 
 > **Status:** Active  
 > **Last updated:** 2026-08-19  
-> **Current phase:** `MAIL-001 — Read-only census`  
-> **Current execution:** `MAIL-001` implementation and verification completed on 2026-08-19.  
+> **Current phase:** `MAIL-001.1 — Bounded Gmail fetch concurrency`<br>
+> **Current execution:** `MAIL-001.1` implementation and verification completed on 2026-08-19.<br>
 > **Source of truth:** This file should be updated as design decisions or phase status change.
 
 ---
@@ -40,7 +40,7 @@ The LLM must **never** have Gmail credentials or direct Gmail mutation tools.
 
 ### Current state
 
-`MAIL-001` is implemented and verified. Future work should begin at `MAIL-002` without broadening the completed read-only scanner's authority.
+`MAIL-001` is implemented and verified. `MAIL-001.1` adds bounded fetch concurrency before the first real-mailbox census without broadening the completed read-only scanner's authority. Future product work should begin at `MAIL-002`.
 
 Do **not** skip ahead to LLM classification or Gmail mutation until the read-only census is working and the real mailbox structure has been inspected.
 
@@ -793,6 +793,27 @@ Build the Gmail metadata index and sender/list exploration dashboard.
 - secrets excluded from logs;
 - synthetic test fixtures included;
 - prompt-injection email included in safety fixture corpus.
+
+---
+
+## MAIL-001.1 — Bounded Gmail Fetch Concurrency
+
+**Status: COMPLETE**
+
+### Goal
+
+Reduce Gmail metadata scan time by fetching messages concurrently within each list page.
+
+### Decision
+
+- configure `Gmail:MaxConcurrentMessageFetches`, defaulting to 12 and clamped to 1–32;
+- use a bounded worker pool and preserve input order in memory;
+- cancel outstanding page work after a non-recovered fetch failure where practical;
+- persist and checkpoint only after every message in the page has fetched successfully;
+- replay failed pages from the previous durable boundary using the existing idempotent upserts;
+- retain the exact `gmail.readonly`, localhost, metadata-only, no-attachment-download, and no-LLM safety boundaries.
+
+This is a performance-hardening step before the first real-mailbox census.
 
 ---
 

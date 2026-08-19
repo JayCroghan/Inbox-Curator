@@ -68,6 +68,7 @@ Press **Scan Gmail** to queue a scan. Scanning runs in a hosted background servi
 | `Gmail:ScanOnStartup` | `false` | Queue a scan after startup |
 | `Gmail:PageSize` | `250` | Gmail list page size (clamped to 1–500) |
 | `Gmail:MaxRetryAttempts` | `6` | Retry limit (clamped to 1–10) |
+| `Gmail:MaxConcurrentMessageFetches` | `12` | Concurrent metadata fetches within one Gmail page (clamped to 1–32) |
 | `SeedSyntheticData` | `false` | Seed the empty database with demo records |
 
 Relative file paths resolve from `src/InboxCurator` when running the project.
@@ -93,7 +94,9 @@ Tests are offline and use synthetic `.eml` files plus in-memory or temporary SQL
 
 ## Scan semantics
 
+- Message metadata within a Gmail list page is fetched concurrently with a bounded worker count (`Gmail:MaxConcurrentMessageFetches`, effective range 1–32).
 - Each pass stores a durable Gmail page token only after the entire page is committed.
+- All message fetches for a page must succeed before any records from that page are persisted, so a failed page is replayed from its previous durable boundary.
 - Restarting after a failure resumes from the last page boundary; replay is safe because Gmail message IDs and sent message/recipient pairs are unique.
 - A new completed scan receives a run ID. Rows not seen in that completed run are pruned, so deleted mail and mail moved to Trash, Spam, Drafts, or Sent does not remain in the census.
 - Failed scans never prune unseen rows.

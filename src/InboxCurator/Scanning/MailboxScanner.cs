@@ -1,6 +1,8 @@
 using InboxCurator.Data;
 using InboxCurator.Gmail;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using System.Runtime.ExceptionServices;
 
 namespace InboxCurator.Scanning;
 
@@ -8,8 +10,14 @@ public sealed class MailboxScanner(
     IGmailMailboxClient gmail,
     IDbContextFactory<InboxCuratorDbContext> contextFactory,
     TimeProvider timeProvider,
+    IOptions<GmailOptions> gmailOptions,
     ILogger<MailboxScanner> logger)
 {
+    private readonly int _maxConcurrentMessageFetches = Math.Clamp(
+        gmailOptions.Value.MaxConcurrentMessageFetches,
+        GmailOptions.MinimumMaxConcurrentMessageFetches,
+        GmailOptions.MaximumMaxConcurrentMessageFetches);
+
     public async Task ScanAsync(CancellationToken cancellationToken)
     {
         await ScanKindAsync(ScanKind.Sent, cancellationToken);
@@ -29,11 +37,7 @@ public sealed class MailboxScanner(
             do
             {
                 var page = await gmail.ListAsync(kind, pageToken, cancellationToken);
-                var metadata = new List<GmailMessageMetadata>(page.MessageIds.Count);
-                foreach (var messageId in page.MessageIds)
-                {
-                    metadata.Add(await gmail.GetMetadataAsync(messageId, cancellationToken));
-                }
+                var metadata = await FetchPageMetadataAsync(page.MessageIds, cancellationToken);
 
                 await PersistPageAsync(kind, metadata, page.NextPageToken, scanRunId, cancellationToken);
                 pageToken = page.NextPageToken;
@@ -51,6 +55,60 @@ public sealed class MailboxScanner(
             await FailAsync(kind, SanitizeFailureCode(exception), CancellationToken.None);
             throw;
         }
+    }
+
+    private async Task<IReadOnlyList<GmailMessageMetadata>> FetchPageMetadataAsync(
+        IReadOnlyList<string> messageIds,
+        CancellationToken cancellationToken)
+    {
+        if (messageIds.Count == 0)
+        {
+            return [];
+        }
+
+        var metadata = new GmailMessageMetadata[messageIds.Count];
+        var nextIndex = -1;
+        ExceptionDispatchInfo? firstFailure = null;
+        using var pageCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        async Task FetchAsync()
+        {
+            while (!pageCancellation.IsCancellationRequested)
+            {
+                var index = Interlocked.Increment(ref nextIndex);
+                if (index >= messageIds.Count)
+                {
+                    return;
+                }
+
+                try
+                {
+                    metadata[index] = await gmail.GetMetadataAsync(messageIds[index], pageCancellation.Token);
+                }
+                catch (OperationCanceledException) when (pageCancellation.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    var captured = ExceptionDispatchInfo.Capture(exception);
+                    if (Interlocked.CompareExchange(ref firstFailure, captured, null) is null)
+                    {
+                        await pageCancellation.CancelAsync();
+                    }
+
+                    return;
+                }
+            }
+        }
+
+        var workerCount = Math.Min(_maxConcurrentMessageFetches, messageIds.Count);
+        var workers = Enumerable.Range(0, workerCount).Select(_ => FetchAsync()).ToArray();
+        await Task.WhenAll(workers);
+
+        cancellationToken.ThrowIfCancellationRequested();
+        firstFailure?.Throw();
+        return metadata;
     }
 
     private async Task<ScanCheckpoint> StartOrResumeAsync(ScanKind kind, CancellationToken cancellationToken)
