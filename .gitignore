@@ -1,0 +1,11 @@
+bin/
+obj/
+storage/
+artifacts/TestResults*/
+client_secret*.json
+tokens/
+*.db
+*.db-shm
+*.db-wal
+.vs/
+TestResults/

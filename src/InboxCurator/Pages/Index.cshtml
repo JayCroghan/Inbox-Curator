@@ -1,0 +1,155 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Mailbox census";
+    var lastCompleted = Model.Result.Checkpoints
+        .Where(checkpoint => checkpoint.CompletedAtUtc.HasValue)
+        .OrderByDescending(checkpoint => checkpoint.CompletedAtUtc)
+        .FirstOrDefault();
+    var anyFailed = Model.Result.Checkpoints.Any(checkpoint => checkpoint.State == ScanState.Failed);
+}
+
+<div class="workspace" data-scan-running="@Model.ScanIsRunning.ToString().ToLowerInvariant()">
+    <section class="workspace-heading" aria-labelledby="page-title">
+        <div>
+            <p class="eyebrow">Single-mailbox census</p>
+            <h1 id="page-title">Where your inbox<br />really comes from.</h1>
+            <p class="heading-note">Received mail grouped by List-ID, then normalized sender. Sent mail contributes relationship signals only.</p>
+        </div>
+        <div class="scan-console">
+            <div class="scan-state">
+                <span class="status-dot @(Model.ScanIsRunning ? "is-active" : anyFailed ? "is-error" : "")" aria-hidden="true"></span>
+                <div>
+                    <strong>@(Model.ScanIsRunning ? "Scan in progress" : anyFailed ? "Scan needs attention" : "Census ready")</strong>
+                    <span>
+                        @if (Model.ScanIsRunning)
+                        {
+                            <text>Refreshing this view automatically</text>
+                        }
+                        else if (lastCompleted is not null)
+                        {
+                            <text>Last completed @lastCompleted.CompletedAtUtc!.Value.ToString("d MMM yyyy, HH:mm") UTC</text>
+                        }
+                        else
+                        {
+                            <text>No Gmail scan has run yet</text>
+                        }
+                    </span>
+                </div>
+            </div>
+            <form method="post" asp-page-handler="Scan">
+                <input type="hidden" name="q" value="@Model.Search" />
+                <input type="hidden" name="sort" value="@Model.Sort" />
+                <input type="hidden" name="dir" value="@Model.Direction" />
+                <input type="hidden" name="pageNumber" value="@Model.Result.Page" />
+                <input type="hidden" name="pageSize" value="@Model.Result.PageSize" />
+                <button class="scan-button" type="submit" disabled="@Model.ScanIsRunning">
+                    <span>@(Model.ScanIsRunning ? "Scanning…" : "Scan Gmail")</span>
+                    <span aria-hidden="true">↗</span>
+                </button>
+            </form>
+        </div>
+    </section>
+
+    @if (!string.IsNullOrEmpty(Model.Notice))
+    {
+        <div class="notice" role="status">@Model.Notice</div>
+    }
+
+    <section class="metrics" aria-label="Census summary">
+        <div><span>Indexed messages</span><strong>@Model.Result.Metrics.MessageCount.ToString("N0")</strong></div>
+        <div><span>Sources</span><strong>@Model.Result.Metrics.GroupCount.ToString("N0")</strong></div>
+        <div><span>Unread</span><strong>@Model.Result.Metrics.UnreadCount.ToString("N0")</strong></div>
+        <div><span>Known relationships</span><strong>@Model.Result.Metrics.RelationshipCount.ToString("N0")</strong></div>
+    </section>
+
+    <section class="census" aria-labelledby="census-title">
+        <div class="census-toolbar">
+            <div>
+                <p class="eyebrow">Volume by source</p>
+                <h2 id="census-title">Mailbox census</h2>
+            </div>
+            <form method="get" class="filters" role="search">
+                <label>
+                    <span class="visually-hidden">Search sources or subjects</span>
+                    <input type="search" name="q" value="@Model.Search" placeholder="Search sender, list or subject" />
+                </label>
+                <input type="hidden" name="sort" value="@Model.Sort" />
+                <input type="hidden" name="dir" value="@Model.Direction" />
+                <label class="page-size">
+                    <span>Rows</span>
+                    <select name="pageSize" data-auto-submit>
+                        @foreach (var size in new[] { 10, 25, 50 })
+                        {
+                            <option value="@size" selected="@(Model.Result.PageSize == size)">@size</option>
+                        }
+                    </select>
+                </label>
+                <button type="submit">Search</button>
+            </form>
+        </div>
+
+        <div class="table-shell">
+            <table>
+                <thead>
+                    <tr>
+                        <th class="source-column"><a asp-route-q="@Model.Search" asp-route-sort="sender" asp-route-dir="@Model.NextDirection("sender")" asp-route-pageSize="@Model.Result.PageSize">Sender / list <span>@Model.SortIndicator("sender")</span></a></th>
+                        <th class="numeric"><a asp-route-q="@Model.Search" asp-route-sort="count" asp-route-dir="@Model.NextDirection("count")" asp-route-pageSize="@Model.Result.PageSize">Messages <span>@Model.SortIndicator("count")</span></a></th>
+                        <th><a asp-route-q="@Model.Search" asp-route-sort="first" asp-route-dir="@Model.NextDirection("first")" asp-route-pageSize="@Model.Result.PageSize">First <span>@Model.SortIndicator("first")</span></a></th>
+                        <th><a asp-route-q="@Model.Search" asp-route-sort="last" asp-route-dir="@Model.NextDirection("last")" asp-route-pageSize="@Model.Result.PageSize">Last <span>@Model.SortIndicator("last")</span></a></th>
+                        <th class="numeric"><a asp-route-q="@Model.Search" asp-route-sort="unread" asp-route-dir="@Model.NextDirection("unread")" asp-route-pageSize="@Model.Result.PageSize">Unread <span>@Model.SortIndicator("unread")</span></a></th>
+                        <th class="numeric"><a asp-route-q="@Model.Search" asp-route-sort="starred" asp-route-dir="@Model.NextDirection("starred")" asp-route-pageSize="@Model.Result.PageSize">Starred <span>@Model.SortIndicator("starred")</span></a></th>
+                        <th class="numeric"><a asp-route-q="@Model.Search" asp-route-sort="important" asp-route-dir="@Model.NextDirection("important")" asp-route-pageSize="@Model.Result.PageSize">Important <span>@Model.SortIndicator("important")</span></a></th>
+                        <th class="numeric"><a asp-route-q="@Model.Search" asp-route-sort="relationship" asp-route-dir="@Model.NextDirection("relationship")" asp-route-pageSize="@Model.Result.PageSize">Related <span>@Model.SortIndicator("relationship")</span></a></th>
+                        <th><a asp-route-q="@Model.Search" asp-route-sort="promotion" asp-route-dir="@Model.NextDirection("promotion")" asp-route-pageSize="@Model.Result.PageSize">Promotions <span>@Model.SortIndicator("promotion")</span></a></th>
+                        <th class="subjects-column">Representative subjects</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (Model.Result.Groups.Count == 0)
+                    {
+                        <tr><td colspan="10" class="empty-state">No sources match this view. Run a scan or adjust the search.</td></tr>
+                    }
+                    @foreach (var group in Model.Result.Groups)
+                    {
+                        <tr>
+                            <td class="source-cell">
+                                <strong>@group.Display</strong>
+                                <span>@group.Kind · @group.GroupKey[(group.GroupKey.IndexOf(':') + 1)..]</span>
+                            </td>
+                            <td class="numeric count-cell">@group.MessageCount.ToString("N0")</td>
+                            <td><time datetime="@group.FirstDateUtc.ToString("O")">@group.FirstDateUtc.ToString("dd MMM yy")</time></td>
+                            <td><time datetime="@group.LastDateUtc.ToString("O")">@group.LastDateUtc.ToString("dd MMM yy")</time></td>
+                            <td class="numeric">@group.UnreadCount</td>
+                            <td class="numeric">@group.StarredCount</td>
+                            <td class="numeric">@group.ImportantCount</td>
+                            <td class="numeric relationship-cell">@(group.RelationshipCount > 0 ? group.RelationshipCount : "—")</td>
+                            <td>
+                                <div class="promotion" title="@group.PromotionPercentage.ToString("0.#")% promotions">
+                                    <progress max="100" value="@group.PromotionPercentage.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)">@group.PromotionPercentage.ToString("0")%</progress>
+                                    <em>@group.PromotionPercentage.ToString("0")%</em>
+                                </div>
+                            </td>
+                            <td>
+                                <ul class="subjects">
+                                    @foreach (var subject in group.RepresentativeSubjects)
+                                    {
+                                        <li>@subject</li>
+                                    }
+                                </ul>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <nav class="pagination" aria-label="Census pages">
+            <span>Showing page @Model.Result.Page of @Model.Result.TotalPages · @Model.Result.TotalGroups sources</span>
+            <div>
+                <a class="@(Model.Result.Page <= 1 ? "is-disabled" : "")" asp-route-q="@Model.Search" asp-route-sort="@Model.Sort" asp-route-dir="@Model.Direction" asp-route-pageNumber="@(Model.Result.Page - 1)" asp-route-pageSize="@Model.Result.PageSize" aria-disabled="@(Model.Result.Page <= 1)">← Previous</a>
+                <a class="@(Model.Result.Page >= Model.Result.TotalPages ? "is-disabled" : "")" asp-route-q="@Model.Search" asp-route-sort="@Model.Sort" asp-route-dir="@Model.Direction" asp-route-pageNumber="@(Model.Result.Page + 1)" asp-route-pageSize="@Model.Result.PageSize" aria-disabled="@(Model.Result.Page >= Model.Result.TotalPages)">Next →</a>
+            </div>
+        </nav>
+    </section>
+</div>

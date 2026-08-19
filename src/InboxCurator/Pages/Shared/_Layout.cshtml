@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>@ViewData["Title"] · Inbox Curator</title>
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body>
+    <header class="site-header">
+        <a class="wordmark" asp-page="/Index" aria-label="Inbox Curator home">
+            <span class="wordmark-mark" aria-hidden="true">IC</span>
+            <span>Inbox Curator</span>
+        </a>
+        <div class="privacy-note"><span aria-hidden="true">●</span> Local only · read-only</div>
+    </header>
+    <main>
+        @RenderBody()
+    </main>
+    <footer class="site-footer">
+        <span>Metadata census</span>
+        <span>No bodies. No mailbox changes.</span>
+    </footer>
+    <script src="~/js/site.js" asp-append-version="true" defer></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

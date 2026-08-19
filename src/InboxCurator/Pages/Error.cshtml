@@ -1,0 +1,11 @@
+@page
+@model ErrorModel
+@{
+    ViewData["Title"] = "Something went wrong";
+}
+<div class="error-page">
+    <p class="eyebrow">Inbox Curator</p>
+    <h1>The local census hit a snag.</h1>
+    <p>No mailbox changes were made. Return to the dashboard and resume the scan from its last durable checkpoint.</p>
+    <a asp-page="/Index">Return to mailbox census →</a>
+</div>

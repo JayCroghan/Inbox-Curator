@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/InboxCurator/InboxCurator.csproj" />
+  <Project Path="tests/InboxCurator.Tests/InboxCurator.Tests.csproj" />
+</Solution>
