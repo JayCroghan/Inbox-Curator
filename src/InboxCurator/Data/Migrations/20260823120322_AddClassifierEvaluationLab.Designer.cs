@@ -3,6 +3,7 @@ using System;
 using InboxCurator.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace InboxCurator.Data.Migrations
 {
     [DbContext(typeof(InboxCuratorDbContext))]
-    partial class InboxCuratorDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260823120322_AddClassifierEvaluationLab")]
+    partial class AddClassifierEvaluationLab
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
@@ -31,9 +34,6 @@ namespace InboxCurator.Data.Migrations
 
                     b.Property<DateTime?>("LockedAtUtc")
                         .HasColumnType("TEXT");
-
-                    b.Property<long?>("LockedEvaluationCorpusId")
-                        .HasColumnType("INTEGER");
 
                     b.Property<string>("OutputJsonSchema")
                         .IsRequired()
@@ -59,8 +59,6 @@ namespace InboxCurator.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("LockedEvaluationCorpusId");
 
                     b.HasIndex("Version")
                         .IsUnique();
@@ -724,16 +722,6 @@ namespace InboxCurator.Data.Migrations
                     b.ToTable("SentInteractions", (string)null);
                 });
 
-            modelBuilder.Entity("InboxCurator.Data.ClassifierPromptVersion", b =>
-                {
-                    b.HasOne("InboxCurator.Data.EvaluationCorpus", "LockedEvaluationCorpus")
-                        .WithMany("LockedPromptVersions")
-                        .HasForeignKey("LockedEvaluationCorpusId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("LockedEvaluationCorpus");
-                });
-
             modelBuilder.Entity("InboxCurator.Data.ClassifierResult", b =>
                 {
                     b.HasOne("InboxCurator.Data.ClassifierRun", "ClassifierRun")
@@ -838,8 +826,6 @@ namespace InboxCurator.Data.Migrations
             modelBuilder.Entity("InboxCurator.Data.EvaluationCorpus", b =>
                 {
                     b.Navigation("Items");
-
-                    b.Navigation("LockedPromptVersions");
 
                     b.Navigation("Runs");
                 });

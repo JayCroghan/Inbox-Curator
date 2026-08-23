@@ -1,6 +1,6 @@
 # InboxCurator
 
-InboxCurator is a local, read-only Gmail census and human triage workspace. It scans one mailbox, groups received messages by `List-ID` (falling back to normalized sender), and lets the user persist exact-cluster seed policy locally. A separate Sent scan identifies addresses and threads the user has interacted with.
+InboxCurator is a local, read-only Gmail census, human triage workspace, and local classifier evaluation lab. It scans one mailbox, groups received messages by `List-ID` (falling back to normalized sender), and lets the user persist exact-cluster seed policy locally. A separate Sent scan identifies addresses and threads the user has interacted with.
 
 The application is an ASP.NET Core Razor Pages app targeting .NET 10. It binds only to `127.0.0.1`, stores metadata in SQLite, and never persists email bodies, HTML, attachment content, or OAuth tokens in the database.
 
@@ -16,7 +16,8 @@ The application is an ASP.NET Core Razor Pages app targeting .NET 10. It binds o
 - Attachment detection uses a subsequent partial response containing MIME filenames and attachment IDs only. Body data is excluded, and the attachment endpoint is never called.
 - Logs contain scan state, counts, retry timing, and sanitized failure codes—not OAuth tokens, headers, addresses, subjects, or body content.
 - Human decisions record local future intent only. No decision handler calls Gmail or changes mailbox state.
-- The project makes no LLM, MCP, OpenClaw, or other AI call. The adversarial email fixture is inert test corpus for future work.
+- Classifier evaluation uses only local SQLite evidence and loopback Ollama. It has no Gmail credentials or tools and makes no cloud LLM, MCP, or OpenClaw call.
+- Configured models are checked through Ollama's local installed-model endpoint and are never pulled, downloaded, copied, quantized, or replaced by the app.
 
 See [ADR 0001](docs/adr/0001-read-only-privacy-boundary.md) for the enforced privacy boundary.
 
@@ -74,6 +75,20 @@ Decisions are editable and removable. Current state and append-only revision his
 
 ![Synthetic MAIL-002 cluster detail](docs/screenshots/mail-002-cluster-detail.png)
 
+### Local classifier lab
+
+Open [http://127.0.0.1:5137/Classifier](http://127.0.0.1:5137/Classifier) to create a frozen benchmark from active `KeepProtect` and `UnwantedExistingAndFuture` decisions. Clean-existing, age-based, and deferred decisions are excluded with explicit counts. Evidence and deterministic representative subjects come only from the existing SQLite census; ground truth is retained separately for scoring and is never part of the classifier input payload.
+
+`MAIL-003A-PROMPT-V1` is an immutable conservative prompt with an actual Ollama JSON Schema and a second application-domain validation boundary. Development + validation may run while the prompt is open. Locking requires a completed development + validation run and permanently pins V1 to that run's frozen corpus. Holdout always uses the pinned corpus even if a newer corpus is later created, and detailed holdout examples are not exposed before that methodological boundary.
+
+Runs execute as durable background jobs. Ollama HTTP requests have no implicit client timeout; the durable run cancellation token remains the active inference cancellation boundary. Before a fresh profile is measured, an already-resident exact model is unloaded, then every selected item is processed before the model is unloaded again and the next profile begins. Each item result is saved independently, restart resume skips completed profile/item pairs, cancellation is visible, and one invalid/failed result does not erase other work. Holdout safety is `INCOMPLETE` until every expected item for a completed profile has a valid result; any observed high-confidence KEEP → UNWANTED is immediately `FAILED`. The scoreboard emphasizes that error, high-confidence unwanted precision, abstention/coverage, Ollama timing/token metrics, cold load, and VRAM residency. It never chooses a winner, classifies unreviewed sources, or updates human policy.
+
+![Synthetic MAIL-003A Classifier Lab](docs/screenshots/mail-003a-classifier-lab.png)
+
+![Synthetic MAIL-003A safety scoreboard](docs/screenshots/mail-003a-classifier-scoreboard.png)
+
+![Synthetic MAIL-003A dangerous disagreement](docs/screenshots/mail-003a-classifier-disagreement.png)
+
 ### Configuration
 
 | Key | Default | Purpose |
@@ -86,7 +101,11 @@ Decisions are editable and removable. Current state and append-only revision his
 | `Gmail:PageSize` | `250` | Gmail list page size (clamped to 1–500) |
 | `Gmail:MaxRetryAttempts` | `6` | Retry limit (clamped to 1–10) |
 | `Gmail:MaxConcurrentMessageFetches` | `12` | Concurrent metadata fetches within one Gmail page (clamped to 1–32) |
+| `Ollama:BaseUrl` | `http://127.0.0.1:11434` | Loopback-only local Ollama API; non-loopback values are rejected |
+| `Ollama:MaxRetryAttempts` | `2` | Small bounded retry count for transient local HTTP failures (clamped to 1–4) |
+| `Ollama:Profiles` | Five MAIL-003A profiles | Configurable model, think mode, temperature, context, stream, and keep-alive snapshots |
 | `SeedSyntheticData` | `false` | Seed the empty database with demo records |
+| `SeedSyntheticEvaluationData` | `false` | Add a fake completed bakeoff for UI/screenshots; never calls Ollama inference |
 
 Relative file paths resolve from `src/InboxCurator` when running the project.
 
@@ -99,6 +118,22 @@ dotnet run --project src/InboxCurator/InboxCurator.csproj -- --SeedSyntheticData
 ```
 
 The committed [MAIL-002 triage dashboard](docs/screenshots/mail-002-triage-dashboard.png), [cluster detail](docs/screenshots/mail-002-cluster-detail.png), [overview](docs/screenshots/dashboard-overview.jpg), and [census table](docs/screenshots/dashboard-census.jpg) screenshots use only these synthetic records.
+
+To preview the evaluation lab with synthetic completed runs (without running inference):
+
+```powershell
+dotnet run --project src/InboxCurator/InboxCurator.csproj -- --SeedSyntheticData=true --SeedSyntheticEvaluationData=true "--ConnectionStrings:InboxCurator=Data Source=storage/evaluation-demo.db"
+```
+
+The five initial configured profiles are:
+
+- `qwen36-35b-nothink` — `qwen3.6:35b`, `think=false`;
+- `gemma4-31b-default` — `gemma4:31b`, think omitted;
+- `deepseek-r1-32b-thinking` — `deepseek-r1:32b`, `think=true`;
+- `ornith-15-35b-default` — `ornith-1.5:35b`, think omitted;
+- `gpt-oss-low` — `gpt-oss:latest`, `think="low"`.
+
+All default to temperature 0, `num_ctx=8192`, `stream=false`, and `keep_alive=30m`. The app never pulls a missing model.
 
 ## Test and coverage
 

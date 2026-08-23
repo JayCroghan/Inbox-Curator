@@ -1,0 +1,239 @@
+@page
+@model ClassifierModel
+@{
+    ViewData["Title"] = "Classifier Lab";
+    var selectedRun = Model.Snapshot.SelectedRun;
+}
+
+<div class="lab-workspace">
+    <section class="lab-heading">
+        <div>
+            <p class="eyebrow">MAIL-003A · local evaluation laboratory</p>
+            <h1>Measure judgment.<br /><em>Protect the keep pile.</em></h1>
+            <p class="heading-note">A frozen, local-only bakeoff against explicit human policy. Models see census metadata and representative subjects—not bodies, credentials, decisions, or ground-truth labels.</p>
+        </div>
+        <aside class="lab-safety-callout" aria-label="Primary safety metric">
+            <span>Primary safety metric</span>
+            <strong>Human KEEP → Model UNWANTED</strong>
+            <p>Any high-confidence occurrence on locked holdout fails the safety gate. Abstaining is safer than guessing.</p>
+        </aside>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(Model.Notice))
+    {
+        <div class="notice lab-notice" role="status">@Model.Notice</div>
+    }
+
+    <section class="lab-readiness" aria-label="Evaluation readiness">
+        <article>
+            <header><span>01</span><h2>Frozen corpus</h2></header>
+            @if (Model.Snapshot.Corpus is { } corpus)
+            {
+                <strong class="lab-key-value">@corpus.EligibleSourceCount.ToString("N0") eligible sources</strong>
+                <p>@corpus.KeepCount KEEP · @corpus.UnwantedCount UNWANTED</p>
+                <dl class="lab-mini-grid">
+                    <div><dt>Development</dt><dd>@corpus.DevelopmentCount</dd></div>
+                    <div><dt>Validation</dt><dd>@corpus.ValidationCount</dd></div>
+                    <div><dt>Locked holdout</dt><dd>@corpus.HoldoutCount</dd></div>
+                </dl>
+                <p class="lab-micro">@corpus.Version · @corpus.CreatedAtUtc.ToString("u")</p>
+                <details class="lab-disclosure">
+                    <summary>Excluded human decisions</summary>
+                    <p>Clean existing only: @corpus.ExcludedCleanExistingOnlyCount · Age rules: @corpus.ExcludedCleanOlderThanCount · Deferred: @corpus.ExcludedDeferCount · Missing evidence: @corpus.ExcludedMissingEvidenceCount</p>
+                    <p>@corpus.SplitStrategy</p>
+                </details>
+            }
+            else
+            {
+                <strong class="lab-key-value">No frozen corpus</strong>
+                <p>Create a reproducible snapshot from the current eligible human decisions.</p>
+            }
+            <form method="post" asp-page-handler="CreateCorpus">
+                <button class="lab-secondary-button" type="submit">Create new frozen corpus</button>
+            </form>
+        </article>
+
+        <article>
+            <header><span>02</span><h2>Prompt contract</h2></header>
+            <strong class="lab-key-value">@Model.Snapshot.Prompt.Version</strong>
+            <p class="prompt-state @(Model.Snapshot.Prompt.IsLocked ? "is-locked" : "")">
+                @(Model.Snapshot.Prompt.IsHoldoutReady ? "Locked" : Model.Snapshot.Prompt.IsLocked ? "Lock requires corpus pin" : "Open for development")
+            </p>
+            <dl class="lab-mini-grid">
+                <div><dt>Schema</dt><dd>@Model.Snapshot.Prompt.SchemaVersion</dd></div>
+                <div class="wide"><dt>SHA-256</dt><dd class="hash-value">@Model.Snapshot.Prompt.Hash</dd></div>
+            </dl>
+            @if (Model.Snapshot.Prompt.IsHoldoutReady)
+            {
+                <p class="lab-micro"><strong>Pinned corpus:</strong> @Model.Snapshot.Prompt.LockedEvaluationCorpusVersion · ID @Model.Snapshot.Prompt.LockedEvaluationCorpusId</p>
+            }
+            <p class="lab-micro">Mailbox strings are explicitly untrusted data. V1 contains no human-label examples.</p>
+            @if (!Model.Snapshot.Prompt.IsHoldoutReady && Model.Snapshot.Corpus is { } lockCorpus)
+            {
+                <form method="post" asp-page-handler="LockPrompt">
+                    <input type="hidden" name="corpusId" value="@lockCorpus.Id" />
+                    <button class="lab-secondary-button" type="submit">Lock prompt for holdout</button>
+                </form>
+            }
+        </article>
+
+        <article>
+            <header><span>03</span><h2>Local runtime</h2></header>
+            <strong class="lab-key-value">@(Model.Snapshot.OllamaReachable ? "Ollama reachable" : "Ollama unavailable")</strong>
+            <p>127.0.0.1 only · one inference at a time · explicit unload between models</p>
+            <ul class="profile-status-list">
+                @foreach (var profile in Model.Snapshot.Profiles)
+                {
+                    <li>
+                        <span class="availability @(profile.IsInstalled == true ? "is-ready" : profile.IsInstalled == false ? "is-missing" : "")" aria-hidden="true"></span>
+                        <span><strong>@profile.Key</strong><small>@profile.Model · think @profile.Think · temp @profile.Temperature.ToString("N0") · ctx @profile.ContextLength · stream off · keep @profile.KeepAlive</small></span>
+                    </li>
+                }
+            </ul>
+        </article>
+    </section>
+
+    <section class="lab-run-panel">
+        <div>
+            <p class="eyebrow">Experiment controls</p>
+            <h2>Run model-at-a-time</h2>
+            <p>Every selected item is durably recorded before the next. Resume skips completed profile/item pairs; a failed item remains visible and does not erase progress.</p>
+        </div>
+        <form method="post" asp-page-handler="Run" class="run-form">
+            <fieldset @(selectedRun?.IsActive == true ? "disabled" : null)>
+                <legend>Profiles</legend>
+                @foreach (var profile in Model.Snapshot.Profiles)
+                {
+                    <label><input type="checkbox" name="SelectedProfiles" value="@profile.Key" checked /> <span>@profile.Key</span></label>
+                }
+            </fieldset>
+            <div class="run-actions">
+                <button type="submit" name="Stage" value="DevelopmentValidation" @(Model.Snapshot.Corpus is null || selectedRun?.IsActive == true ? "disabled" : null)>Run development + validation</button>
+                <button class="holdout-button" type="submit" name="Stage" value="Holdout" @(!Model.Snapshot.Prompt.IsHoldoutReady || selectedRun?.IsActive == true ? "disabled" : null)>Run locked holdout</button>
+            </div>
+        </form>
+    </section>
+
+    @if (selectedRun is not null)
+    {
+        <section class="run-progress" data-classifier-running="@(selectedRun.IsActive ? "true" : "false")">
+            <div>
+                <p class="eyebrow">Current run · @selectedRun.Stage</p>
+                <strong>@selectedRun.State</strong>
+                <span>@selectedRun.ProcessedItems.ToString("N0") / @selectedRun.TotalItems.ToString("N0") items · @selectedRun.CurrentProfileKey · @selectedRun.CurrentSplit · elapsed @ClassifierModel.Elapsed(selectedRun)</span>
+            </div>
+            <progress value="@selectedRun.ProcessedItems" max="@Math.Max(1, selectedRun.TotalItems)">@selectedRun.ProgressPercentage.ToString("N0")%</progress>
+            <small>@selectedRun.Id · created @selectedRun.CreatedAtUtc.ToString("u")</small>
+            @if (selectedRun.IsActive)
+            {
+                <form method="post" asp-page-handler="Cancel">
+                    <input type="hidden" name="runId" value="@selectedRun.Id" />
+                    <button type="submit">Cancel run</button>
+                </form>
+            }
+        </section>
+
+        <section class="scoreboard">
+            <div class="section-heading-row">
+                <div><p class="eyebrow">Comparative results</p><h2>Safety-first scoreboard</h2></div>
+                <form method="get" class="run-picker">
+                    <label>Run
+                        <select name="runId" data-auto-submit>
+                            @foreach (var run in Model.Snapshot.RecentRuns)
+                            {
+                                <option value="@run.Id" selected="@(run.Id == selectedRun.Id)">@run.CreatedAtUtc.ToString("g") · @run.Stage · @run.State</option>
+                            }
+                        </select>
+                    </label>
+                </form>
+            </div>
+            <div class="table-shell lab-table-shell">
+                <table class="score-table">
+                    <thead><tr>
+                        <th>Model / profile</th><th>Safety gate</th>
+                        <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="dangerous" asp-route-dir="@Model.NextDirection("dangerous")">KEEP→unwanted</a></th>
+                        <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="hcdangerous" asp-route-dir="@Model.NextDirection("hcdangerous")">HC danger</a></th>
+                        <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="precision" asp-route-dir="@Model.NextDirection("precision")">HC unwanted precision</a></th>
+                        <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="review" asp-route-dir="@Model.NextDirection("review")">Needs review</a></th>
+                        <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="decisive" asp-route-dir="@Model.NextDirection("decisive")">Decisive</a></th>
+                        <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="accuracy" asp-route-dir="@Model.NextDirection("accuracy")">Accuracy*</a></th>
+                        <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="latency" asp-route-dir="@Model.NextDirection("latency")">Median</a></th>
+                        <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="tokens" asp-route-dir="@Model.NextDirection("tokens")">tok/s</a></th>
+                        <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="cold" asp-route-dir="@Model.NextDirection("cold")">Cold load</a></th>
+                        <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="vram" asp-route-dir="@Model.NextDirection("vram")">VRAM</a></th>
+                    </tr></thead>
+                    <tbody>
+                    @foreach (var score in Model.Snapshot.Scores)
+                    {
+                        <tr class="@(score.SafetyGate == SafetyGateStatus.Failed ? "safety-failed-row" : null)">
+                            <td><strong>@score.ProfileKey</strong><small>@score.ModelName</small></td>
+                            <td><span class="safety-badge is-@score.SafetyGate.ToString().ToLowerInvariant()">@(score.SafetyGate == SafetyGateStatus.Failed ? "Safety gate failed" : score.SafetyGate.ToString())</span></td>
+                            <td class="danger-metric">@score.KeepToUnwantedCount</td>
+                            <td class="danger-metric">@score.HighConfidenceKeepToUnwantedCount</td>
+                            <td>@ClassifierModel.Percentage(score.HighConfidenceUnwantedPrecisionPercentage)</td>
+                            <td>@ClassifierModel.Percentage(score.NeedsReviewRatePercentage)</td>
+                            <td>@ClassifierModel.Percentage(score.OverallDecisiveCoveragePercentage)</td>
+                            <td>@ClassifierModel.Percentage(score.ExactBinaryAccuracyPercentage)</td>
+                            <td>@ClassifierModel.Duration(score.MedianSteadyStateDurationMilliseconds)</td>
+                            <td>@(score.MedianGenerationTokensPerSecond?.ToString("N1") ?? "—")</td>
+                            <td>@(score.ColdLoadDurationSeconds?.ToString("N1") ?? "—")s</td>
+                            <td>@ClassifierModel.Percentage(score.VramPercentage) @(score.PredominantlyVramResident == false ? "offload" : "")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+            <p class="lab-micro">* Binary accuracy excludes abstentions. Cold-load requests are excluded from steady-state latency and throughput.</p>
+        </section>
+
+        <section class="disagreement-section">
+            <div class="section-heading-row">
+                <div><p class="eyebrow">Read-only inspection</p><h2>Disagreements & failures</h2></div>
+                <p>@Model.Snapshot.DisagreementCount.ToString("N0") records · frozen evidence only</p>
+            </div>
+            @if (!Model.Snapshot.HoldoutDetailsVisible)
+            {
+                <div class="locked-details">Holdout examples remain hidden until the prompt is explicitly locked.</div>
+            }
+            else if (Model.Snapshot.Disagreements.Count == 0)
+            {
+                <div class="empty-state">No disagreements have been recorded for this run.</div>
+            }
+            else
+            {
+                <div class="disagreement-list">
+                @foreach (var item in Model.Snapshot.Disagreements)
+                {
+                    var dangerous = item.GroundTruth == EvaluationGroundTruth.Keep && item.Recommendation == ClassifierRecommendation.Unwanted;
+                    <details class="disagreement-item @(dangerous ? "is-dangerous" : null)">
+                        <summary>
+                            <span><strong>@item.DisplayName</strong><small>@item.TargetType · @item.TargetValue</small></span>
+                            <span class="comparison"><b>Human @item.GroundTruth</b><i>→</i><b>Model @(item.Recommendation?.ToString() ?? item.Status.ToString())</b></span>
+                            <span>@item.Confidence · @item.ProfileKey</span>
+                        </summary>
+                        <div class="disagreement-evidence">
+                            <dl>
+                                <div><dt>Messages</dt><dd>@item.MessageCount</dd></div><div><dt>Range</dt><dd>@item.FirstReceivedUtc.ToString("d") – @item.LastReceivedUtc.ToString("d")</dd></div>
+                                <div><dt>Unread</dt><dd>@item.UnreadCount</dd></div><div><dt>Starred / important</dt><dd>@item.StarredCount / @item.ImportantCount</dd></div>
+                                <div><dt>Relationships</dt><dd>@item.RelationshipCount</dd></div><div><dt>Promotions</dt><dd>@item.PromotionsPercentage.ToString("N1")%</dd></div>
+                                <div><dt>List unsubscribe</dt><dd>@item.ListUnsubscribePercentage.ToString("N1")%</dd></div><div><dt>Attachments</dt><dd>@item.AttachmentPercentage.ToString("N1")%</dd></div>
+                            </dl>
+                            <div><p><strong>@item.Category</strong> · @string.Join(", ", item.ReasonCodes)</p><p>@(item.Rationale ?? item.FailureCode)</p></div>
+                            <ol>
+                                @foreach (var subject in item.RepresentativeSubjects) { <li>@(string.IsNullOrEmpty(subject) ? "(empty subject)" : subject)</li> }
+                            </ol>
+                        </div>
+                    </details>
+                }
+                </div>
+                <nav class="pagination" aria-label="Disagreement pages">
+                    <span>Page @Model.Snapshot.ErrorPage of @Model.Snapshot.ErrorPageCount</span>
+                    <div>
+                        <a class="@(Model.Snapshot.ErrorPage <= 1 ? "is-disabled" : null)" asp-route-runId="@selectedRun.Id" asp-route-errorPage="@(Model.Snapshot.ErrorPage - 1)">Previous</a>
+                        <a class="@(Model.Snapshot.ErrorPage >= Model.Snapshot.ErrorPageCount ? "is-disabled" : null)" asp-route-runId="@selectedRun.Id" asp-route-errorPage="@(Model.Snapshot.ErrorPage + 1)">Next</a>
+                    </div>
+                </nav>
+            }
+        </section>
+    }
+</div>

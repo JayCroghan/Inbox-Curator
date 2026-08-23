@@ -7,7 +7,7 @@ namespace InboxCurator.Tests;
 public sealed class DatabaseMigrationTests
 {
     [Fact]
-    public async Task MigrateAsync_AppliesHumanDecisionSchemaToFreshDatabase()
+    public async Task MigrateAsync_AppliesClassifierEvaluationSchemaToFreshDatabase()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"inbox-curator-migration-{Guid.NewGuid():N}.db");
         try
@@ -21,7 +21,12 @@ public sealed class DatabaseMigrationTests
 
             var migrations = await db.Database.GetAppliedMigrationsAsync();
             Assert.Equal(
-                ["202608190001_InitialCreate", "202608190002_HumanSeedDecisions"],
+                [
+                    "202608190001_InitialCreate",
+                    "202608190002_HumanSeedDecisions",
+                    "20260823120322_AddClassifierEvaluationLab",
+                    "20260823195011_PinPromptToEvaluationCorpus"
+                ],
                 migrations);
             db.ClusterDecisions.Add(new ClusterDecision
             {
@@ -36,6 +41,8 @@ public sealed class DatabaseMigrationTests
             });
             await db.SaveChangesAsync();
             Assert.Single(await db.ClusterDecisions.ToListAsync());
+            Assert.True(await db.Database.CanConnectAsync());
+            Assert.Empty(await db.EvaluationCorpora.ToListAsync());
         }
         finally
         {

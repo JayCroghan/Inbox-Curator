@@ -2,8 +2,8 @@
 
 > **Status:** Active  
 > **Last updated:** 2026-08-23<br>
-> **Current phase:** `MAIL-002.1 — Preserve triage scroll position`<br>
-> **Current execution:** `MAIL-002.1` implementation and verification are complete; awaiting review and merge.<br>
+> **Current phase:** `MAIL-003A — Local model bakeoff and classifier evaluation lab`<br>
+> **Current execution:** Build the frozen local evaluation corpus and safety-first Ollama bakeoff; the real five-model run is intentionally not part of development.<br>
 > **Source of truth:** This file should be updated as design decisions or phase status change.
 
 ---
@@ -40,13 +40,13 @@ The LLM must **never** have Gmail credentials or direct Gmail mutation tools.
 
 ### Current state
 
-`MAIL-001` and `MAIL-001.1` are complete. The first real census validated cluster-first triage: 30,283 messages across 3,632 sender/List-ID sources, including 16,496 unread and 9,583 messages with relationship signals. The highest-volume 24 sources represented approximately 40.2% of indexed mail, and the largest cluster contained 5,900 messages.
+`MAIL-001` and `MAIL-001.1` are complete. The first real census validated cluster-first triage, and the current checkpoint contains 30,297 messages across 2,989 sender/List-ID sources.
 
-`MAIL-002` is complete. Human decisions remain exact to one normalized List-ID or fallback sender cluster. Domain-wide rules are intentionally deferred because different streams from the same brand/domain have materially different histories and may need different policies.
+`MAIL-002` and `MAIL-002.1` are complete. Human decisions remain exact to one normalized List-ID or fallback sender cluster. Domain-wide rules are intentionally deferred because different streams from the same brand/domain have materially different histories and may need different policies. The current mailbox has 2,909 unreviewed sources and approximately 80 reviewed sources; explicit policy covers 18,054 messages (6,539 Keep / Protect and 11,515 intended quarantine), or 59.6% of the mailbox.
 
-`MAIL-002.1` preserves the current triage viewport across decision POST/redirect/get cycles using short-lived, query-scoped browser session state. It changes no Gmail, decision, audit, or persistence behavior.
+Manual triage stopped once the largest remaining unreviewed clusters reached approximately 50 messages and the decisions-per-minute leverage collapsed. Those explicit human decisions now seed `MAIL-003A`'s frozen, local model benchmark. The protected false positive—human KEEP classified as UNWANTED—is the primary safety metric.
 
-Do **not** skip ahead to LLM classification or Gmail mutation until the read-only census is working and the real mailbox structure has been inspected.
+`MAIL-003B` is intentionally deferred until the user and design reviewer inspect the bakeoff. No unknown-source classification or Gmail mutation belongs in `MAIL-003A`.
 
 ---
 
@@ -209,8 +209,8 @@ This must remain inert text.
 - SQLite
 - EF Core migrations
 - Gmail REST API
-- Provider-neutral LLM abstraction
-- OpenAI-compatible structured-output classifier initially
+- Provider-neutral classifier abstraction
+- Local Ollama structured-output classifier for MAIL-003A
 - localhost-only web UI initially
 
 ### Suggested solution structure
@@ -861,36 +861,42 @@ No Gmail behavior, local policy semantics, audit history, or database schema cha
 
 ---
 
-## MAIL-003 — LLM Dry-Run Classifier
+## MAIL-003A — Local Model Bakeoff and Classifier Evaluation Lab
+
+**Status: CURRENT**
 
 ### Goal
 
-Add model recommendations without changing Gmail.
+Measure which installed local Ollama model/profile best reproduces explicit human KEEP and UNWANTED decisions without classifying unreviewed sources.
 
 ### Add
 
-- `IEmailClassifier`;
-- strict structured output schema;
-- representative-sample construction;
-- content minimization;
-- prompt injection safety tests;
-- protected-category checks;
-- comparison UI showing human rule vs deterministic evidence vs model opinion.
+- provider-neutral `IClusterClassifier` with a loopback-only Ollama implementation;
+- versioned immutable `MAIL-003A-PROMPT-V1` and strict JSON Schema/domain validation;
+- frozen evidence snapshots built only from Keep / Protect and Unwanted — Existing + Future;
+- deterministic, stratified 60/20/20 development, validation, and locked-holdout splits;
+- deterministic time-distributed subject samples built only from SQLite metadata;
+- durable model-at-a-time runs with progress, cancellation, restart resume, item failures, and explicit unload boundaries;
+- per-inference Ollama timing/token metrics plus `/api/ps` VRAM residency evidence;
+- safety-first scoreboard and read-only disagreement inspection.
 
 ### Evaluation
 
-Build an evaluation set from human decisions.
+The primary metric is `HUMAN KEEP -> MODEL UNWANTED`. Any high-confidence occurrence on locked holdout fails the safety gate. A holdout profile remains incomplete until every expected item has a valid result with no request/schema failures; development remains preflight. Prompt locking requires a completed development/validation run and pins V1 to that frozen corpus so later corpora cannot replace its holdout. High-confidence unwanted precision, abstention rate, decisive coverage, binary accuracy excluding abstentions, schema/request failures, steady-state latency, throughput, cold load, and VRAM residency remain visible. The UI does not choose a winner.
 
-Track at least:
+Only SQLite evidence is supplied to the model. Ground truth, decisions, audits, mailbox coverage, bodies, attachment contents, Gmail credentials/tools, shell/browser tools, and other model outputs are excluded. Sender/list strings and subjects are explicitly untrusted data.
 
-- protected false-positive count;
-- unwanted precision;
-- review rate;
-- sender/list consistency;
-- disagreements between deterministic rules and model;
-- disagreements between model versions.
+The five initial profiles run without interleaving: Qwen no-think, Gemma default, DeepSeek thinking, Ornith default, and GPT-OSS low. Models are stored on HDD, so Ollama inference has no implicit 100-second HTTP timeout and cold model-load duration is separated from steady-state inference. A fresh measured profile unloads an already-resident exact model before its first request. The lab checks installed models but never pulls or alters them.
 
-False positives in protected/important mail are the primary risk metric.
+Gmail remains exactly `gmail.readonly`; the lab uses SQLite plus local Ollama only.
+
+---
+
+## MAIL-003B — Unknown-source dry-run classification
+
+**Status: DEFERRED**
+
+Do not design or execute this phase until the `MAIL-003A` bakeoff, prompt behavior, disagreements, latency, and VRAM residency have been inspected. It will apply the selected profile to unreviewed sources in dry-run mode without accepting recommendations automatically.
 
 ---
 
