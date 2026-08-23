@@ -69,6 +69,11 @@
     window.setTimeout(() => window.location.reload(), 5000);
   }
 
+  const classifierRun = document.querySelector("[data-classifier-running]");
+  if (classifierRun?.dataset.classifierRunning === "true") {
+    window.setTimeout(() => window.location.reload(), 5000);
+  }
+
   document.querySelectorAll("[data-auto-submit]").forEach((control) => {
     control.addEventListener("change", () => control.form?.submit());
   });

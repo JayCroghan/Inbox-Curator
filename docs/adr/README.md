@@ -7,3 +7,4 @@
 | [0003](0003-grouping-and-relationship-model.md) | List-ID grouping with a compact Sent interaction index | Accepted |
 | [0004](0004-local-razor-pages-and-sqlite.md) | Loopback Razor Pages application with SQLite | Accepted |
 | [0005](0005-exact-cluster-human-policy.md) | Audited human policy on exact sender/List-ID clusters | Accepted |
+| [0006](0006-local-classifier-evaluation.md) | Frozen, local-only, safety-first Ollama classifier evaluation | Accepted |

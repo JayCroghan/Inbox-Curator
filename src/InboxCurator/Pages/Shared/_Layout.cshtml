@@ -13,7 +13,11 @@
             <span class="wordmark-mark" aria-hidden="true">IC</span>
             <span>Inbox Curator</span>
         </a>
-        <div class="privacy-note"><span aria-hidden="true">●</span> Local only · read-only</div>
+        <nav class="site-nav" aria-label="Primary navigation">
+            <a asp-page="/Index">Triage</a>
+            <a asp-page="/Classifier">Classifier lab</a>
+        </nav>
+        <div class="privacy-note"><span aria-hidden="true">●</span> Local only · Gmail read-only</div>
     </header>
     <main>
         @RenderBody()

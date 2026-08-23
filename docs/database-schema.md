@@ -1,6 +1,6 @@
 # Database schema
 
-EF Core migration `202608190001_InitialCreate` creates the census tables. Migration `202608190002_HumanSeedDecisions` adds durable current decisions and append-only decision history. SQLite stores UTC `DateTime` values as `TEXT`, booleans as `INTEGER`, and enum values as readable strings.
+EF Core migration `202608190001_InitialCreate` creates the census tables. Migration `202608190002_HumanSeedDecisions` adds durable current decisions and append-only decision history. Migration `20260823120322_AddClassifierEvaluationLab` adds frozen corpora, immutable prompt versions, durable background runs, model-profile snapshots, and per-item results. SQLite stores UTC `DateTime` values as `TEXT`, booleans as `INTEGER`, and enum values as readable strings.
 
 ```mermaid
 erDiagram
@@ -50,10 +50,62 @@ erDiagram
         INTEGER Revision
         INTEGER MatchingMessageCount
     }
+    EvaluationCorpora {
+        INTEGER Id PK
+        TEXT Version UK
+        TEXT SplitStrategy
+        INTEGER EligibleSourceCount
+    }
+    EvaluationCorpusItems {
+        INTEGER Id PK
+        INTEGER EvaluationCorpusId FK
+        TEXT TargetType
+        TEXT TargetValue
+        TEXT GroundTruth
+        TEXT Split
+        INTEGER MessageCount
+        TEXT RepresentativeSubjectsJson
+    }
+    ClassifierPromptVersions {
+        INTEGER Id PK
+        TEXT Version UK
+        TEXT SystemPromptSha256
+        TEXT OutputSchemaVersion
+        INTEGER IsLocked
+    }
+    ClassifierRuns {
+        TEXT Id PK
+        INTEGER EvaluationCorpusId FK
+        INTEGER ClassifierPromptVersionId FK
+        TEXT Stage
+        TEXT State
+    }
+    ClassifierRunProfiles {
+        INTEGER Id PK
+        TEXT ClassifierRunId FK
+        TEXT ProfileKey
+        TEXT ModelName
+        TEXT ThinkMode
+    }
+    ClassifierResults {
+        INTEGER Id PK
+        TEXT ClassifierRunId FK
+        INTEGER ClassifierRunProfileId FK
+        INTEGER EvaluationCorpusItemId FK
+        TEXT Status
+        TEXT Recommendation
+        TEXT Confidence
+    }
 
     SentInteractions }o..o{ Messages : "matches address or thread in query"
     ClusterDecisions ||--o{ ClusterDecisionAudits : "records revisions"
     ClusterDecisions }o..o{ Messages : "matches exact GroupKey in query"
+    EvaluationCorpora ||--|{ EvaluationCorpusItems : "freezes evidence"
+    EvaluationCorpora ||--o{ ClassifierRuns : "benchmarked by"
+    ClassifierPromptVersions ||--o{ ClassifierRuns : "reproduces prompt"
+    ClassifierRuns ||--|{ ClassifierRunProfiles : "snapshots settings"
+    ClassifierRunProfiles ||--o{ ClassifierResults : "produces"
+    EvaluationCorpusItems ||--o{ ClassifierResults : "scored separately"
 ```
 
 The relationship is derived, not a foreign key: Gmail threads can span multiple messages, and an address interaction can relate to many messages.
@@ -148,6 +200,26 @@ The relationship is derived, not a foreign key: Gmail threads can span multiple 
 | `MatchingMessageCount` | No | Current exact-cluster size when the change was made |
 | `ChangedAtUtc` | No | Revision timestamp |
 
+## Classifier evaluation tables
+
+### `EvaluationCorpora` and `EvaluationCorpusItems`
+
+Each corpus is an immutable benchmark version with creation time, fixed split strategy, eligible count, and explicit exclusion counts for Clean Existing Only, Clean Older Than, Defer, and eligible decisions without local evidence. Items snapshot exact target type/value, display identity, ground truth, persisted split, all classifier evidence counts/dates, and deterministic representative subjects.
+
+Only active `KeepProtect` and `UnwantedExistingAndFuture` decisions become binary ground truth. Ground truth is stored on the corpus item for scoring but is absent from the typed classifier input contract. A later Gmail scan or decision edit does not mutate an existing corpus.
+
+### `ClassifierPromptVersions`
+
+Stores immutable prompt text, SHA-256, output schema version, actual JSON Schema, creation time, and explicit holdout-lock state. Startup rejects changing prompt/schema text under the existing `MAIL-003A-PROMPT-V1` identifier.
+
+### `ClassifierRuns` and `ClassifierRunProfiles`
+
+`ClassifierRuns` stores the corpus/prompt foreign keys, development-validation or holdout stage, durable job state, progress counts, current profile/split, sanitized failure code, cancellation state, and timestamps. `ClassifierRunProfiles` snapshots the exact profile key, model, think mode, temperature, context length, stream setting, keep-alive, execution order, lifecycle state, cold-load duration, model/VRAM sizes, runtime context, and offload warning.
+
+### `ClassifierResults`
+
+The unique `(ClassifierRunProfileId, EvaluationCorpusItemId)` pair is the resume/idempotency boundary. Each row stores completion/schema/request status; validated recommendation, confidence, category, reason codes, and short rationale; sanitized failure code; whether thinking was present and its character count (never the thinking text); cold-request flag; and Ollama duration/token counters. Results cannot alter `ClusterDecisions`.
+
 ## Deliberately absent
 
-There are no columns for body text, HTML, snippets, raw MIME, attachment bytes, unsubscribe values, OAuth access/refresh tokens, or client secrets.
+There are no columns for body text, HTML, snippets, raw MIME, attachment bytes, unsubscribe values, OAuth access/refresh tokens, client secrets, full model thinking, or cloud-model credentials.
