@@ -19,7 +19,7 @@
     </summary>
     <div class="decision-popover">
         <p>Exact @ClusterDecisionPresentation.TargetLabel(Model.TargetType) policy</p>
-        <form method="post" asp-page="/Index" asp-page-handler="Decide" class="decision-actions">
+        <form method="post" asp-page="/Index" asp-page-handler="Decide" class="decision-actions" data-preserve-triage-scroll>
             <input type="hidden" name="TargetType" value="@Model.TargetType" />
             <input type="hidden" name="TargetValue" value="@Model.TargetValue" />
             <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
@@ -28,7 +28,7 @@
             <button type="submit" name="Decision" value="CleanExistingOnly">Clean existing only</button>
             <button type="submit" name="Decision" value="Defer">Defer</button>
         </form>
-        <form method="post" asp-page="/Index" asp-page-handler="Decide" class="age-rule-form">
+        <form method="post" asp-page="/Index" asp-page-handler="Decide" class="age-rule-form" data-preserve-triage-scroll>
             <input type="hidden" name="TargetType" value="@Model.TargetType" />
             <input type="hidden" name="TargetValue" value="@Model.TargetValue" />
             <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
@@ -54,7 +54,7 @@
         </form>
         @if (Model.DecisionKind is not null)
         {
-            <form method="post" asp-page="/Index" asp-page-handler="RemoveDecision" class="remove-decision-form">
+            <form method="post" asp-page="/Index" asp-page-handler="RemoveDecision" class="remove-decision-form" data-preserve-triage-scroll>
                 <input type="hidden" name="TargetType" value="@Model.TargetType" />
                 <input type="hidden" name="TargetValue" value="@Model.TargetValue" />
                 <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
