@@ -19,7 +19,10 @@ public sealed record EvaluationScoredItem(
     long? TotalDurationNanoseconds,
     int? PromptEvalCount,
     int? EvalCount,
-    long? EvalDurationNanoseconds);
+    long? EvalDurationNanoseconds,
+    ClassifierNormalizationMode? NormalizationMode = null,
+    int SemanticWarningCount = 0,
+    long? RepairTotalDurationNanoseconds = null);
 
 public sealed record ClassifierScore(
     string RunId,
@@ -54,7 +57,19 @@ public sealed record ClassifierScore(
     double? ColdLoadDurationSeconds,
     double? TotalProfileDurationSeconds,
     double? VramPercentage,
-    bool? PredominantlyVramResident);
+    bool? PredominantlyVramResident,
+    string PromptVersion,
+    ClassifierResponseProtocol ResponseProtocol,
+    int ValidCanonicalResultCount,
+    int ExpectedResultCount,
+    int DirectNormalizationCount,
+    double DirectNormalizationPercentage,
+    int SelfRepairedCount,
+    double SelfRepairedPercentage,
+    int UnresolvedNormalizationFailureCount,
+    int SemanticWarningCount,
+    double? MedianRepairDurationMilliseconds,
+    double TotalRepairOverheadSeconds);
 
 public static class EvaluationScoreCalculator
 {
@@ -81,7 +96,7 @@ public static class EvaluationScoreCalculator
             (item.GroundTruth == EvaluationGroundTruth.Keep && item.Recommendation == ClassifierRecommendation.Keep) ||
             (item.GroundTruth == EvaluationGroundTruth.Unwanted && item.Recommendation == ClassifierRecommendation.Unwanted));
         var highConfidenceDecisive = decisive.Count(item => item.Confidence == ClassifierConfidence.High);
-        var steady = completed.Where(item => !item.IsColdLoadRequest).ToArray();
+        var steady = items.Where(item => !item.IsColdLoadRequest).ToArray();
         var steadyDurations = steady
             .Where(item => item.TotalDurationNanoseconds.HasValue)
             .Select(item => item.TotalDurationNanoseconds!.Value / 1_000_000d)
@@ -90,6 +105,11 @@ public static class EvaluationScoreCalculator
         var generationRates = steady
             .Where(item => item.EvalCount.HasValue && item.EvalDurationNanoseconds > 0)
             .Select(item => item.EvalCount!.Value / (item.EvalDurationNanoseconds!.Value / 1_000_000_000d))
+            .OrderBy(value => value)
+            .ToArray();
+        var repairDurations = items
+            .Where(item => item.RepairTotalDurationNanoseconds.HasValue)
+            .Select(item => item.RepairTotalDurationNanoseconds!.Value / 1_000_000d)
             .OrderBy(value => value)
             .ToArray();
         var total = items.Count;
@@ -141,7 +161,24 @@ public static class EvaluationScoreCalculator
                 ? (profile.CompletedAtUtc.Value - profile.StartedAtUtc.Value).TotalSeconds
                 : null,
             vramPercentage,
-            profile.PredominantlyVramResident);
+            profile.PredominantlyVramResident,
+            run.ClassifierPromptVersion?.Version ?? "unknown",
+            run.ClassifierPromptVersion?.ResponseProtocol ?? ClassifierResponseProtocol.StrictV1,
+            completed.Length,
+            expectedItemCount,
+            items.Count(item => item.Status == ClassifierResultStatus.Completed && item.NormalizationMode == ClassifierNormalizationMode.Direct),
+            PercentageOrZero(
+                items.Count(item => item.Status == ClassifierResultStatus.Completed && item.NormalizationMode == ClassifierNormalizationMode.Direct),
+                expectedItemCount),
+            items.Count(item => item.Status == ClassifierResultStatus.Completed && item.NormalizationMode == ClassifierNormalizationMode.SelfRepaired),
+            PercentageOrZero(
+                items.Count(item => item.Status == ClassifierResultStatus.Completed && item.NormalizationMode == ClassifierNormalizationMode.SelfRepaired),
+                expectedItemCount),
+            items.Count(item => item.Status == ClassifierResultStatus.SchemaFailure),
+            items.Sum(item => item.SemanticWarningCount),
+            Median(repairDurations),
+            items.Where(item => item.RepairTotalDurationNanoseconds.HasValue)
+                .Sum(item => item.RepairTotalDurationNanoseconds!.Value) / 1_000_000_000d);
     }
 
     private static SafetyGateStatus SafetyGate(

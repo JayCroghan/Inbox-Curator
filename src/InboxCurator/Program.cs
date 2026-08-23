@@ -84,7 +84,7 @@ await using (var scope = app.Services.CreateAsyncScope())
     var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<InboxCuratorDbContext>>();
     await using var db = await factory.CreateDbContextAsync();
     await db.Database.MigrateAsync();
-    await scope.ServiceProvider.GetRequiredService<ClassifierPromptService>().EnsureV1Async();
+    await scope.ServiceProvider.GetRequiredService<ClassifierPromptService>().EnsureAllAsync();
 
     if (builder.Configuration.GetValue<bool>("SeedSyntheticData"))
     {

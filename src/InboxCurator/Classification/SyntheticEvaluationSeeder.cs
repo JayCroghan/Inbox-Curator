@@ -33,31 +33,30 @@ public sealed class SyntheticEvaluationSeeder(
             ClusterTargetType.ListId, "daily.ledger.example", ClusterDecisionKind.UnwantedExistingAndFuture), cancellationToken);
 
         var corpus = await corpora.CreateAsync(cancellationToken);
-        await SeedRunAsync(corpus.Id, ClassifierRunStage.DevelopmentValidation, new DateTime(2026, 8, 23, 7, 20, 0, DateTimeKind.Utc), cancellationToken);
-        await prompts.LockV1Async(corpus.Id, cancellationToken);
-        await SeedRunAsync(corpus.Id, ClassifierRunStage.Holdout, new DateTime(2026, 8, 23, 8, 5, 0, DateTimeKind.Utc), cancellationToken);
+        await prompts.EnsureAllAsync(cancellationToken);
+        await SeedRunAsync(corpus.Id, ClassifierPromptDefinition.Version, new DateTime(2026, 8, 23, 7, 20, 0, DateTimeKind.Utc), cancellationToken);
+        await SeedRunAsync(corpus.Id, ClassifierPromptV2Definition.Version, new DateTime(2026, 8, 23, 8, 5, 0, DateTimeKind.Utc), cancellationToken);
     }
 
     private async Task SeedRunAsync(
         long corpusId,
-        ClassifierRunStage stage,
+        string promptVersion,
         DateTime started,
         CancellationToken cancellationToken)
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
         var prompt = await db.ClassifierPromptVersions.SingleAsync(
-            item => item.Version == ClassifierPromptDefinition.Version, cancellationToken);
+            item => item.Version == promptVersion, cancellationToken);
         var itemsQuery = db.EvaluationCorpusItems.Where(item => item.EvaluationCorpusId == corpusId);
-        itemsQuery = stage == ClassifierRunStage.Holdout
-            ? itemsQuery.Where(item => item.Split == EvaluationSplit.Holdout)
-            : itemsQuery.Where(item => item.Split != EvaluationSplit.Holdout);
+        itemsQuery = itemsQuery.Where(item => item.Split != EvaluationSplit.Holdout);
         var items = await itemsQuery.OrderBy(item => item.Id).ToArrayAsync(cancellationToken);
+        var isV2 = prompt.ResponseProtocol == ClassifierResponseProtocol.NormalizeRepairV2;
         var run = new ClassifierRun
         {
-            Id = $"synthetic-{stage.ToString().ToLowerInvariant()}",
+            Id = isV2 ? "synthetic-v2-development" : "synthetic-v1-development",
             EvaluationCorpusId = corpusId,
             ClassifierPromptVersionId = prompt.Id,
-            Stage = stage,
+            Stage = ClassifierRunStage.DevelopmentValidation,
             State = ClassifierRunState.Completed,
             TotalItems = items.Length * options.Value.Profiles.Count,
             CompletedItems = items.Length * options.Value.Profiles.Count,
@@ -95,7 +94,7 @@ public sealed class SyntheticEvaluationSeeder(
             for (var itemIndex = 0; itemIndex < items.Length; itemIndex++)
             {
                 var item = items[itemIndex];
-                var recommendation = Recommendation(profileIndex, itemIndex, item.GroundTruth, stage);
+                var recommendation = Recommendation(profileIndex, itemIndex, item.GroundTruth, ClassifierRunStage.DevelopmentValidation);
                 var confidence = recommendation == ClassifierRecommendation.NeedsReview
                     ? ClassifierConfidence.Low
                     : profileIndex == 2 ? ClassifierConfidence.High : ClassifierConfidence.Medium;
@@ -123,6 +122,35 @@ public sealed class SyntheticEvaluationSeeder(
                         : recommendation == ClassifierRecommendation.Unwanted
                             ? "The source is dominated by recurring promotional or bulk-mail evidence."
                             : "The source shows useful correspondence or retained transactional evidence.",
+                    PrimaryResponse = isV2 ? JsonSerializer.Serialize(new
+                    {
+                        recommendation = recommendation.ToString(),
+                        confidence = confidence.ToString(),
+                        category = recommendation == ClassifierRecommendation.Unwanted ? "marketing" : "professional",
+                        reasonCodes = recommendation == ClassifierRecommendation.Unwanted
+                            ? new[] { "promotional_content", "bulk_mail" }
+                            : new[] { "relationship_signal", "professional_content" },
+                        explanation = recommendation == ClassifierRecommendation.Unwanted
+                            ? "Recurring promotional evidence dominates, with no material protected counterevidence."
+                            : "Useful correspondence evidence outweighs recurring-noise signals and supports retention."
+                    }) : null,
+                    PrimaryExplanation = isV2
+                        ? recommendation == ClassifierRecommendation.Unwanted
+                            ? "Recurring promotional evidence dominates, with no material protected counterevidence."
+                            : "Useful correspondence evidence outweighs recurring-noise signals and supports retention."
+                        : null,
+                    RawReasonCodesJson = isV2
+                        ? JsonSerializer.Serialize(recommendation == ClassifierRecommendation.Unwanted
+                            ? new[] { "promotional_content", "bulk_mail" }
+                            : new[] { "relationship_signal", "professional_content" })
+                        : null,
+                    NormalizationMode = isV2
+                        ? itemIndex == 1 ? ClassifierNormalizationMode.SelfRepaired : ClassifierNormalizationMode.Direct
+                        : null,
+                    NormalizationWarningsJson = isV2 && itemIndex == 1
+                        ? "[\"recommendation_unrecognized\"]"
+                        : "[]",
+                    SemanticWarningsJson = "[]",
                     ThinkingPresent = configured.Think is "true" or "low",
                     ThinkingCharacterCount = configured.Think is "true" or "low" ? 814 + itemIndex * 31 : 0,
                     IsColdLoadRequest = itemIndex == 0,
@@ -132,6 +160,10 @@ public sealed class SyntheticEvaluationSeeder(
                     PromptEvalDurationNanoseconds = 850_000_000 + itemIndex * 30_000_000,
                     EvalCount = 72 + itemIndex * 4,
                     EvalDurationNanoseconds = 2_000_000_000L + profileIndex * 270_000_000L,
+                    RepairTotalDurationNanoseconds = isV2 && itemIndex == 1 ? 1_400_000_000 : null,
+                    RepairPromptEvalCount = isV2 && itemIndex == 1 ? 180 : null,
+                    RepairEvalCount = isV2 && itemIndex == 1 ? 24 : null,
+                    RepairEvalDurationNanoseconds = isV2 && itemIndex == 1 ? 600_000_000 : null,
                     StartedAtUtc = started.AddSeconds(profileIndex * 120 + itemIndex * 12),
                     CompletedAtUtc = started.AddSeconds(profileIndex * 120 + itemIndex * 12 + 9)
                 });

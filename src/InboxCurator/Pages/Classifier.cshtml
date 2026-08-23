@@ -8,14 +8,14 @@
 <div class="lab-workspace">
     <section class="lab-heading">
         <div>
-            <p class="eyebrow">MAIL-003A · local evaluation laboratory</p>
+            <p class="eyebrow">MAIL-003A.1 · local evaluation laboratory</p>
             <h1>Measure judgment.<br /><em>Protect the keep pile.</em></h1>
-            <p class="heading-note">A frozen, local-only bakeoff against explicit human policy. Models see census metadata and representative subjects—not bodies, credentials, decisions, or ground-truth labels.</p>
+            <p class="heading-note">V2 separates rich model judgment from machine normalization. Models see frozen census evidence—not bodies, credentials, decisions, ground-truth labels, or holdout items.</p>
         </div>
         <aside class="lab-safety-callout" aria-label="Primary safety metric">
             <span>Primary safety metric</span>
             <strong>Human KEEP → Model UNWANTED</strong>
-            <p>Any high-confidence occurrence on locked holdout fails the safety gate. Abstaining is safer than guessing.</p>
+            <p>Development remains preflight. The locked holdout is untouched while V2 response behavior is evaluated.</p>
         </aside>
     </section>
 
@@ -61,18 +61,31 @@
             </p>
             <dl class="lab-mini-grid">
                 <div><dt>Schema</dt><dd>@Model.Snapshot.Prompt.SchemaVersion</dd></div>
-                <div class="wide"><dt>SHA-256</dt><dd class="hash-value">@Model.Snapshot.Prompt.Hash</dd></div>
+                <div><dt>Protocol</dt><dd>@Model.Snapshot.Prompt.ResponseProtocol</dd></div>
+                <div class="wide"><dt>Prompt SHA-256</dt><dd class="hash-value">@Model.Snapshot.Prompt.Hash</dd></div>
+                <div class="wide"><dt>Schema SHA-256</dt><dd class="hash-value">@Model.Snapshot.Prompt.SchemaHash</dd></div>
+                <div><dt>Repair</dt><dd>@Model.Snapshot.Prompt.RepairPromptVersion</dd></div>
+                <div class="wide"><dt>Repair prompt SHA-256</dt><dd class="hash-value">@Model.Snapshot.Prompt.RepairPromptHash</dd></div>
+                <div class="wide"><dt>Repair schema SHA-256</dt><dd class="hash-value">@Model.Snapshot.Prompt.RepairSchemaHash</dd></div>
             </dl>
             @if (Model.Snapshot.Prompt.IsHoldoutReady)
             {
                 <p class="lab-micro"><strong>Pinned corpus:</strong> @Model.Snapshot.Prompt.LockedEvaluationCorpusVersion · ID @Model.Snapshot.Prompt.LockedEvaluationCorpusId</p>
             }
-            <p class="lab-micro">Mailbox strings are explicitly untrusted data. V1 contains no human-label examples.</p>
+            <p class="lab-micro">Mailbox strings and candidate responses are untrusted data. V2 preserves the primary explanation and uses at most one extraction-only repair call.</p>
+            <details class="lab-disclosure">
+                <summary>Immutable response protocols</summary>
+                @foreach (var promptVersion in Model.Snapshot.Prompts)
+                {
+                    <p><strong>@promptVersion.Version</strong> · @promptVersion.ResponseProtocol · @promptVersion.SchemaVersion @(promptVersion.RepairPromptVersion is null ? null : $"· repair {promptVersion.RepairPromptVersion}")</p>
+                }
+            </details>
             @if (!Model.Snapshot.Prompt.IsHoldoutReady && Model.Snapshot.Corpus is { } lockCorpus)
             {
                 <form method="post" asp-page-handler="LockPrompt">
                     <input type="hidden" name="corpusId" value="@lockCorpus.Id" />
-                    <button class="lab-secondary-button" type="submit">Lock prompt for holdout</button>
+                    <input type="hidden" name="promptVersion" value="@Model.Snapshot.Prompt.Version" />
+                    <button class="lab-secondary-button" type="submit">Lock V2 to this corpus</button>
                 </form>
             }
         </article>
@@ -100,6 +113,24 @@
             <p>Every selected item is durably recorded before the next. Resume skips completed profile/item pairs; a failed item remains visible and does not erase progress.</p>
         </div>
         <form method="post" asp-page-handler="Run" class="run-form">
+            <div class="run-inputs">
+                <label>Frozen corpus
+                    <select name="CorpusId" required>
+                        @foreach (var availableCorpus in Model.Snapshot.Corpora)
+                        {
+                            <option value="@availableCorpus.Id">@availableCorpus.Version · ID @availableCorpus.Id · @availableCorpus.EligibleSourceCount sources</option>
+                        }
+                    </select>
+                </label>
+                <label>Response protocol
+                    <select name="PromptVersion" required>
+                        @foreach (var availablePrompt in Model.Snapshot.Prompts)
+                        {
+                            <option value="@availablePrompt.Version" selected="@(availablePrompt.Version == ClassifierPromptV2Definition.Version)">@availablePrompt.Version · @availablePrompt.ResponseProtocol</option>
+                        }
+                    </select>
+                </label>
+            </div>
             <fieldset @(selectedRun?.IsActive == true ? "disabled" : null)>
                 <legend>Profiles</legend>
                 @foreach (var profile in Model.Snapshot.Profiles)
@@ -108,8 +139,8 @@
                 }
             </fieldset>
             <div class="run-actions">
-                <button type="submit" name="Stage" value="DevelopmentValidation" @(Model.Snapshot.Corpus is null || selectedRun?.IsActive == true ? "disabled" : null)>Run development + validation</button>
-                <button class="holdout-button" type="submit" name="Stage" value="Holdout" @(!Model.Snapshot.Prompt.IsHoldoutReady || selectedRun?.IsActive == true ? "disabled" : null)>Run locked holdout</button>
+                <button type="submit" @(Model.Snapshot.Corpus is null || selectedRun?.IsActive == true ? "disabled" : null)>Run development + validation</button>
+                <span class="lab-micro">Holdout execution is disabled in MAIL-003A.1.</span>
             </div>
         </form>
     </section>
@@ -118,12 +149,12 @@
     {
         <section class="run-progress" data-classifier-running="@(selectedRun.IsActive ? "true" : "false")">
             <div>
-                <p class="eyebrow">Current run · @selectedRun.Stage</p>
+                <p class="eyebrow">Current run · @selectedRun.Stage · @selectedRun.PromptVersion</p>
                 <strong>@selectedRun.State</strong>
                 <span>@selectedRun.ProcessedItems.ToString("N0") / @selectedRun.TotalItems.ToString("N0") items · @selectedRun.CurrentProfileKey · @selectedRun.CurrentSplit · elapsed @ClassifierModel.Elapsed(selectedRun)</span>
             </div>
             <progress value="@selectedRun.ProcessedItems" max="@Math.Max(1, selectedRun.TotalItems)">@selectedRun.ProgressPercentage.ToString("N0")%</progress>
-            <small>@selectedRun.Id · created @selectedRun.CreatedAtUtc.ToString("u")</small>
+            <small>@selectedRun.Id · corpus @selectedRun.CorpusVersion / @selectedRun.EvaluationCorpusId · @selectedRun.ResponseProtocol · created @selectedRun.CreatedAtUtc.ToString("u")</small>
             @if (selectedRun.IsActive)
             {
                 <form method="post" asp-page-handler="Cancel">
@@ -141,7 +172,7 @@
                         <select name="runId" data-auto-submit>
                             @foreach (var run in Model.Snapshot.RecentRuns)
                             {
-                                <option value="@run.Id" selected="@(run.Id == selectedRun.Id)">@run.CreatedAtUtc.ToString("g") · @run.Stage · @run.State</option>
+                                <option value="@run.Id" selected="@(run.Id == selectedRun.Id)">@run.CreatedAtUtc.ToString("g") · @run.PromptVersion · @run.State</option>
                             }
                         </select>
                     </label>
@@ -157,7 +188,9 @@
                         <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="review" asp-route-dir="@Model.NextDirection("review")">Needs review</a></th>
                         <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="decisive" asp-route-dir="@Model.NextDirection("decisive")">Decisive</a></th>
                         <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="accuracy" asp-route-dir="@Model.NextDirection("accuracy")">Accuracy*</a></th>
-                        <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="latency" asp-route-dir="@Model.NextDirection("latency")">Median</a></th>
+                        <th>Canonical</th><th>Direct</th><th>Repaired</th><th>Norm failures</th><th>Warnings</th>
+                        <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="latency" asp-route-dir="@Model.NextDirection("latency")">Primary median</a></th>
+                        <th>Repair median</th><th>Repair overhead</th>
                         <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="tokens" asp-route-dir="@Model.NextDirection("tokens")">tok/s</a></th>
                         <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="cold" asp-route-dir="@Model.NextDirection("cold")">Cold load</a></th>
                         <th><a asp-route-runId="@selectedRun.Id" asp-route-scoreSort="vram" asp-route-dir="@Model.NextDirection("vram")">VRAM</a></th>
@@ -166,7 +199,7 @@
                     @foreach (var score in Model.Snapshot.Scores)
                     {
                         <tr class="@(score.SafetyGate == SafetyGateStatus.Failed ? "safety-failed-row" : null)">
-                            <td><strong>@score.ProfileKey</strong><small>@score.ModelName</small></td>
+                            <td><strong>@score.ProfileKey</strong><small>@score.ModelName · @score.PromptVersion · @score.ResponseProtocol</small></td>
                             <td><span class="safety-badge is-@score.SafetyGate.ToString().ToLowerInvariant()">@(score.SafetyGate == SafetyGateStatus.Failed ? "Safety gate failed" : score.SafetyGate.ToString())</span></td>
                             <td class="danger-metric">@score.KeepToUnwantedCount</td>
                             <td class="danger-metric">@score.HighConfidenceKeepToUnwantedCount</td>
@@ -174,7 +207,14 @@
                             <td>@ClassifierModel.Percentage(score.NeedsReviewRatePercentage)</td>
                             <td>@ClassifierModel.Percentage(score.OverallDecisiveCoveragePercentage)</td>
                             <td>@ClassifierModel.Percentage(score.ExactBinaryAccuracyPercentage)</td>
+                            <td>@score.ValidCanonicalResultCount / @score.ExpectedResultCount</td>
+                            <td>@score.DirectNormalizationCount · @ClassifierModel.Percentage(score.DirectNormalizationPercentage)</td>
+                            <td>@score.SelfRepairedCount · @ClassifierModel.Percentage(score.SelfRepairedPercentage)</td>
+                            <td>@score.UnresolvedNormalizationFailureCount</td>
+                            <td>@score.SemanticWarningCount</td>
                             <td>@ClassifierModel.Duration(score.MedianSteadyStateDurationMilliseconds)</td>
+                            <td>@ClassifierModel.Duration(score.MedianRepairDurationMilliseconds)</td>
+                            <td>@score.TotalRepairOverheadSeconds.ToString("N1")s</td>
                             <td>@(score.MedianGenerationTokensPerSecond?.ToString("N1") ?? "—")</td>
                             <td>@(score.ColdLoadDurationSeconds?.ToString("N1") ?? "—")s</td>
                             <td>@ClassifierModel.Percentage(score.VramPercentage) @(score.PredominantlyVramResident == false ? "offload" : "")</td>
@@ -183,7 +223,7 @@
                     </tbody>
                 </table>
             </div>
-            <p class="lab-micro">* Binary accuracy excludes abstentions. Cold-load requests are excluded from steady-state latency and throughput.</p>
+            <p class="lab-micro">* Binary accuracy excludes abstentions. Primary and repair timings are separate; cold primary requests are excluded from steady-state latency and throughput. V1 is strict-schema; V2 is normalize + one repair.</p>
         </section>
 
         <section class="disagreement-section">
@@ -193,7 +233,7 @@
             </div>
             @if (!Model.Snapshot.HoldoutDetailsVisible)
             {
-                <div class="locked-details">Holdout examples remain hidden until the prompt is explicitly locked.</div>
+                <div class="locked-details">Holdout examples are not exposed or executed in MAIL-003A.1.</div>
             }
             else if (Model.Snapshot.Disagreements.Count == 0)
             {
@@ -218,7 +258,31 @@
                                 <div><dt>Relationships</dt><dd>@item.RelationshipCount</dd></div><div><dt>Promotions</dt><dd>@item.PromotionsPercentage.ToString("N1")%</dd></div>
                                 <div><dt>List unsubscribe</dt><dd>@item.ListUnsubscribePercentage.ToString("N1")%</dd></div><div><dt>Attachments</dt><dd>@item.AttachmentPercentage.ToString("N1")%</dd></div>
                             </dl>
-                            <div><p><strong>@item.Category</strong> · @string.Join(", ", item.ReasonCodes)</p><p>@(item.Rationale ?? item.FailureCode)</p></div>
+                            <div class="classifier-explanation">
+                                <p><strong>Canonical:</strong> @item.Category · @(item.ReasonCodes.Count == 0 ? "no recognized reason codes" : string.Join(", ", item.ReasonCodes))</p>
+                                <p><strong>Normalization:</strong> @(item.NormalizationMode?.ToString() ?? "Legacy strict V1")</p>
+                                @if (item.RawReasonCodes.Count > 0)
+                                {
+                                    <p><strong>Raw reason codes:</strong> @string.Join(", ", item.RawReasonCodes)</p>
+                                }
+                                @if (item.NormalizationWarnings.Count > 0)
+                                {
+                                    <p class="normalization-warning"><strong>Normalization warnings:</strong> @string.Join(", ", item.NormalizationWarnings)</p>
+                                }
+                                @if (item.SemanticWarnings.Count > 0)
+                                {
+                                    <p class="semantic-warning"><strong>Semantic warnings:</strong> @string.Join(", ", item.SemanticWarnings)</p>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(item.RepairFailureCode))
+                                {
+                                    <p><strong>Repair failure:</strong> @item.RepairFailureCode</p>
+                                }
+                                <p class="primary-explanation"><strong>Primary explanation</strong><br />@(item.Rationale ?? item.FailureCode ?? "No explanation was recoverable; inspect the stored primary response below.")</p>
+                                @if (!string.IsNullOrWhiteSpace(item.PrimaryResponse) && string.IsNullOrWhiteSpace(item.Rationale))
+                                {
+                                    <details><summary>Stored primary final response</summary><pre>@item.PrimaryResponse</pre></details>
+                                }
+                            </div>
                             <ol>
                                 @foreach (var subject in item.RepresentativeSubjects) { <li>@(string.IsNullOrEmpty(subject) ? "(empty subject)" : subject)</li> }
                             </ol>

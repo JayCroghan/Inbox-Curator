@@ -25,6 +25,12 @@ public sealed record PromptLabSummary(
     string Version,
     string Hash,
     string SchemaVersion,
+    string? SchemaHash,
+    ClassifierResponseProtocol ResponseProtocol,
+    string? RepairPromptVersion,
+    string? RepairPromptHash,
+    string? RepairSchemaVersion,
+    string? RepairSchemaHash,
     bool IsLocked,
     DateTime? LockedAtUtc,
     long? LockedEvaluationCorpusId,
@@ -44,6 +50,10 @@ public sealed record ModelProfileLabSummary(
 
 public sealed record RunLabSummary(
     string Id,
+    long EvaluationCorpusId,
+    string CorpusVersion,
+    string PromptVersion,
+    ClassifierResponseProtocol ResponseProtocol,
     ClassifierRunStage Stage,
     ClassifierRunState State,
     int CompletedItems,
@@ -75,7 +85,13 @@ public sealed record ClassifierDisagreement(
     ClassifierConfidence? Confidence,
     ClassifierCategory? Category,
     IReadOnlyList<string> ReasonCodes,
+    IReadOnlyList<string> RawReasonCodes,
     string? Rationale,
+    string? PrimaryResponse,
+    ClassifierNormalizationMode? NormalizationMode,
+    IReadOnlyList<string> NormalizationWarnings,
+    IReadOnlyList<string> SemanticWarnings,
+    string? RepairFailureCode,
     int MessageCount,
     DateTime FirstReceivedUtc,
     DateTime LastReceivedUtc,
@@ -91,6 +107,8 @@ public sealed record ClassifierDisagreement(
 public sealed record ClassifierLabSnapshot(
     CorpusLabSummary? Corpus,
     PromptLabSummary Prompt,
+    IReadOnlyList<CorpusLabSummary> Corpora,
+    IReadOnlyList<PromptLabSummary> Prompts,
     IReadOnlyList<ModelProfileLabSummary> Profiles,
     bool OllamaReachable,
     RunLabSummary? SelectedRun,
@@ -118,13 +136,16 @@ public sealed class ClassifierLabService(
         CancellationToken cancellationToken)
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        var corpus = await db.EvaluationCorpora.AsNoTracking()
+        var corpusEntities = await db.EvaluationCorpora.AsNoTracking()
             .Include(item => item.Items)
             .OrderByDescending(item => item.CreatedAtUtc)
-            .FirstOrDefaultAsync(cancellationToken);
-        var prompt = await db.ClassifierPromptVersions.AsNoTracking()
+            .ToArrayAsync(cancellationToken);
+        var corpus = corpusEntities.FirstOrDefault();
+        var promptEntities = await db.ClassifierPromptVersions.AsNoTracking()
             .Include(item => item.LockedEvaluationCorpus)
-            .SingleAsync(item => item.Version == ClassifierPromptDefinition.Version, cancellationToken);
+            .OrderByDescending(item => item.CreatedAtUtc)
+            .ToArrayAsync(cancellationToken);
+        var prompt = promptEntities.Single(item => item.Version == ClassifierPromptV2Definition.Version);
 
         IReadOnlySet<string>? installed = null;
         try
@@ -148,6 +169,10 @@ public sealed class ClassifierLabService(
             .Take(12)
             .Select(item => new RunLabSummary(
                 item.Id,
+                item.EvaluationCorpusId,
+                item.EvaluationCorpus.Version,
+                item.ClassifierPromptVersion.Version,
+                item.ClassifierPromptVersion.ResponseProtocol,
                 item.Stage,
                 item.State,
                 item.CompletedItems,
@@ -165,13 +190,13 @@ public sealed class ClassifierLabService(
         var disagreements = Array.Empty<ClassifierDisagreement>();
         var disagreementCount = 0;
         var pageCount = 0;
-        var holdoutDetailsVisible = selectedRunSummary?.Stage != ClassifierRunStage.Holdout ||
-            (prompt.IsLocked && prompt.LockedEvaluationCorpusId.HasValue);
+        var holdoutDetailsVisible = selectedRunSummary?.Stage != ClassifierRunStage.Holdout;
 
         if (selectedRunSummary is not null)
         {
             var run = await db.ClassifierRuns.AsNoTracking()
                 .Include(item => item.Profiles)
+                .Include(item => item.ClassifierPromptVersion)
                 .SingleAsync(item => item.Id == selectedRunSummary.Id, cancellationToken);
             var scoredRows = await db.ClassifierResults.AsNoTracking()
                 .Where(item => item.ClassifierRunId == run.Id)
@@ -186,7 +211,10 @@ public sealed class ClassifierLabService(
                     item.TotalDurationNanoseconds,
                     item.PromptEvalCount,
                     item.EvalCount,
-                    item.EvalDurationNanoseconds
+                    item.EvalDurationNanoseconds,
+                    item.NormalizationMode,
+                    item.SemanticWarningsJson,
+                    item.RepairTotalDurationNanoseconds
                 })
                 .ToArrayAsync(cancellationToken);
             var expectedItemCount = await db.EvaluationCorpusItems.AsNoTracking().CountAsync(
@@ -210,7 +238,10 @@ public sealed class ClassifierLabService(
                             item.TotalDurationNanoseconds,
                             item.PromptEvalCount,
                             item.EvalCount,
-                            item.EvalDurationNanoseconds))
+                            item.EvalDurationNanoseconds,
+                            item.NormalizationMode,
+                            DeserializeStrings(item.SemanticWarningsJson).Length,
+                            item.RepairTotalDurationNanoseconds))
                         .ToArray(),
                     expectedItemCount))
                 .ToArray(), scoreSort, direction);
@@ -248,7 +279,14 @@ public sealed class ClassifierLabService(
                         item.Confidence,
                         item.Category,
                         item.ReasonCodesJson,
-                        item.Rationale
+                        item.RawReasonCodesJson,
+                        item.Rationale,
+                        item.PrimaryExplanation,
+                        item.PrimaryResponse,
+                        item.NormalizationMode,
+                        item.NormalizationWarningsJson,
+                        item.SemanticWarningsJson,
+                        item.RepairFailureCode
                     })
                     .ToArrayAsync(cancellationToken);
                 disagreements = rows.Select(item => new ClassifierDisagreement(
@@ -265,7 +303,13 @@ public sealed class ClassifierLabService(
                     item.Confidence,
                     item.Category,
                     DeserializeStrings(item.ReasonCodesJson),
-                    item.Rationale,
+                    DeserializeStrings(item.RawReasonCodesJson),
+                    item.PrimaryExplanation ?? item.Rationale,
+                    item.PrimaryResponse,
+                    item.NormalizationMode,
+                    DeserializeStrings(item.NormalizationWarningsJson),
+                    DeserializeStrings(item.SemanticWarningsJson),
+                    item.RepairFailureCode,
                     item.Corpus.MessageCount,
                     item.Corpus.FirstReceivedUtc,
                     item.Corpus.LastReceivedUtc,
@@ -280,31 +324,13 @@ public sealed class ClassifierLabService(
             }
         }
 
-        var corpusSummary = corpus is null ? null : new CorpusLabSummary(
-            corpus.Id,
-            corpus.Version,
-            corpus.CreatedAtUtc,
-            corpus.EligibleSourceCount,
-            corpus.Items.Count(item => item.GroundTruth == EvaluationGroundTruth.Keep),
-            corpus.Items.Count(item => item.GroundTruth == EvaluationGroundTruth.Unwanted),
-            corpus.Items.Count(item => item.Split == EvaluationSplit.Development),
-            corpus.Items.Count(item => item.Split == EvaluationSplit.Validation),
-            corpus.Items.Count(item => item.Split == EvaluationSplit.Holdout),
-            corpus.ExcludedCleanExistingOnlyCount,
-            corpus.ExcludedCleanOlderThanCount,
-            corpus.ExcludedDeferCount,
-            corpus.ExcludedMissingEvidenceCount,
-            corpus.SplitStrategy);
+        var corpusSummaries = corpusEntities.Select(MapCorpus).ToArray();
+        var promptSummaries = promptEntities.Select(MapPrompt).ToArray();
         return new ClassifierLabSnapshot(
-            corpusSummary,
-            new PromptLabSummary(
-                prompt.Version,
-                prompt.SystemPromptSha256,
-                prompt.OutputSchemaVersion,
-                prompt.IsLocked,
-                prompt.LockedAtUtc,
-                prompt.LockedEvaluationCorpusId,
-                prompt.LockedEvaluationCorpus?.Version),
+            corpus is null ? null : MapCorpus(corpus),
+            MapPrompt(prompt),
+            corpusSummaries,
+            promptSummaries,
             profiles,
             installed is not null,
             selectedRunSummary,
@@ -316,6 +342,37 @@ public sealed class ClassifierLabService(
             pageCount,
             holdoutDetailsVisible);
     }
+
+    private static CorpusLabSummary MapCorpus(EvaluationCorpus corpus) => new(
+        corpus.Id,
+        corpus.Version,
+        corpus.CreatedAtUtc,
+        corpus.EligibleSourceCount,
+        corpus.Items.Count(item => item.GroundTruth == EvaluationGroundTruth.Keep),
+        corpus.Items.Count(item => item.GroundTruth == EvaluationGroundTruth.Unwanted),
+        corpus.Items.Count(item => item.Split == EvaluationSplit.Development),
+        corpus.Items.Count(item => item.Split == EvaluationSplit.Validation),
+        corpus.Items.Count(item => item.Split == EvaluationSplit.Holdout),
+        corpus.ExcludedCleanExistingOnlyCount,
+        corpus.ExcludedCleanOlderThanCount,
+        corpus.ExcludedDeferCount,
+        corpus.ExcludedMissingEvidenceCount,
+        corpus.SplitStrategy);
+
+    private static PromptLabSummary MapPrompt(ClassifierPromptVersion prompt) => new(
+        prompt.Version,
+        prompt.SystemPromptSha256,
+        prompt.OutputSchemaVersion,
+        prompt.OutputJsonSchemaSha256,
+        prompt.ResponseProtocol,
+        prompt.RepairPromptVersion,
+        prompt.RepairSystemPromptSha256,
+        prompt.RepairOutputSchemaVersion,
+        prompt.RepairOutputJsonSchemaSha256,
+        prompt.IsLocked,
+        prompt.LockedAtUtc,
+        prompt.LockedEvaluationCorpusId,
+        prompt.LockedEvaluationCorpus?.Version);
 
     private static ClassifierScore[] SortScores(ClassifierScore[] scores, string sort, string direction)
     {

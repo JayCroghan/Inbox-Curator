@@ -104,9 +104,9 @@ public sealed class OllamaClientTests
             new ClusterClassifierInput("sender", "a@example.test", "A", "Sender", 1, DateTime.UnixEpoch, DateTime.UnixEpoch, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, []),
             CancellationToken.None);
 
-        Assert.True(response.Metrics.ThinkingPresent);
-        Assert.Equal(22, response.Metrics.ThinkingCharacterCount);
-        Assert.Equal(ClassifierRecommendation.Keep, response.Output.Recommendation);
+        Assert.True(response.PrimaryMetrics.ThinkingPresent);
+        Assert.Equal(22, response.PrimaryMetrics.ThinkingCharacterCount);
+        Assert.Equal(ClassifierRecommendation.Keep, response.Output!.Recommendation);
         Assert.DoesNotContain(api.Response.Thinking!, JsonSerializer.Serialize(response), StringComparison.Ordinal);
     }
 
@@ -136,6 +136,101 @@ public sealed class OllamaClientTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             client.ChatAsync(profile, prompt, "{\"messageCount\":10}", cancellation.Token));
     }
+
+    [Fact]
+    public async Task RepairRequest_UsesSameProfileAndContainsOnlyPrimaryResponse()
+    {
+        var handler = new RecordingHandler(_ => Json("""
+            {"message":{"content":"{\"recommendation\":\"needs_review\",\"confidence\":\"low\",\"category\":\"unknown\",\"reasonCodes\":[]}"}}
+            """));
+        var client = CreateClient(handler);
+        var profile = new ClassifierModelProfile("profile", "same-model", null, 0, 8192, false, "30m");
+        var primaryResponse = "{\"recommendation\":\"unclear\",\"explanation\":\"Candidate explanation.\"}";
+
+        await client.RepairAsync(profile, V2Prompt(), primaryResponse, CancellationToken.None);
+
+        Assert.Single(handler.Requests);
+        using var request = JsonDocument.Parse(handler.Requests[0].Body!);
+        Assert.Equal("same-model", request.RootElement.GetProperty("model").GetString());
+        var messages = request.RootElement.GetProperty("messages");
+        Assert.Equal(ClassifierPromptV2Definition.RepairSystemPrompt, messages[0].GetProperty("content").GetString());
+        var userPayload = messages[1].GetProperty("content").GetString()!;
+        using var repairInput = JsonDocument.Parse(userPayload);
+        Assert.Equal(primaryResponse, repairInput.RootElement.GetProperty("candidatePrimaryResponse").GetString());
+        Assert.DoesNotContain("messageCount", userPayload, StringComparison.Ordinal);
+        Assert.DoesNotContain("groundTruth", userPayload, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("uniqueItems", handler.Requests[0].Body!, StringComparison.Ordinal);
+        Assert.DoesNotContain("maxItems", handler.Requests[0].Body!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InvalidPrimaryRecommendation_IsSelfRepairedOnceWithSeparateMetricsAndOriginalExplanation()
+    {
+        var primaryContent = """
+            {"recommendation":"retain_this","confidence":"medium","category":"professional","reasonCodes":["professional_content"],"explanation":"Professional evidence supports retention, though the label was non-canonical."}
+            """;
+        var api = new RepairingApiClient(
+            Chat(primaryContent, total: 240_000_000_000, load: 238_000_000_000),
+            Chat("""{"recommendation":"keep","confidence":"medium","category":"professional","reasonCodes":["professional_content"]}""", total: 2_000_000_000, load: 10_000_000));
+        var classifier = new OllamaClusterClassifier(api);
+        var profile = new ClassifierModelProfile("profile", "model", null, 0, 8192, false, "30m");
+
+        var result = await classifier.ClassifyAsync(profile, V2Prompt(), Input(), CancellationToken.None);
+
+        Assert.Equal(1, api.RepairCalls);
+        Assert.Same(profile, api.PrimaryProfile);
+        Assert.Same(profile, api.RepairProfile);
+        Assert.Equal(primaryContent, api.RepairInput);
+        Assert.Equal(ClassifierNormalizationMode.SelfRepaired, result.NormalizationMode);
+        Assert.Equal(ClassifierRecommendation.Keep, result.Output!.Recommendation);
+        Assert.Equal("Professional evidence supports retention, though the label was non-canonical.", result.PrimaryExplanation);
+        Assert.Equal(240_000_000_000, result.PrimaryMetrics.TotalDurationNanoseconds);
+        Assert.Equal(2_000_000_000, result.RepairMetrics!.TotalDurationNanoseconds);
+        Assert.DoesNotContain("thinking trace that must not persist", JsonSerializer.Serialize(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InvalidJson_RepairsAtMostOnceAndFailedRepairBecomesNormalizationFailure()
+    {
+        var api = new RepairingApiClient(
+            Chat("not valid json", total: 9_000_000_000, load: 8_000_000_000),
+            Chat("still not valid json", total: 1_000_000_000, load: 1_000_000));
+        var classifier = new OllamaClusterClassifier(api);
+
+        var result = await classifier.ClassifyAsync(
+            new ClassifierModelProfile("profile", "model", null, 0, 8192, false, "30m"),
+            V2Prompt(),
+            Input(),
+            CancellationToken.None);
+
+        Assert.Equal(1, api.RepairCalls);
+        Assert.Null(result.Output);
+        Assert.Equal(ClassifierNormalizationMode.Failed, result.NormalizationMode);
+        Assert.Equal("normalization_failed", result.NormalizationFailureCode);
+        Assert.Equal("repair_invalid_json", result.RepairFailureCode);
+        Assert.Equal("not valid json", result.PrimaryResponse);
+    }
+
+    private static ClassifierPromptSnapshot V2Prompt() => new(
+        ClassifierPromptV2Definition.Version,
+        ClassifierPromptV2Definition.SystemPrompt,
+        ClassifierPromptV2Definition.SystemPromptSha256,
+        ClassifierPromptV2Definition.OutputSchemaVersion,
+        ClassifierPromptV2Definition.OutputJsonSchema,
+        ClassifierResponseProtocol.NormalizeRepairV2,
+        ClassifierPromptV2Definition.RepairPromptVersion,
+        ClassifierPromptV2Definition.RepairSystemPrompt,
+        ClassifierPromptV2Definition.RepairSystemPromptSha256,
+        ClassifierPromptV2Definition.RepairOutputSchemaVersion,
+        ClassifierPromptV2Definition.RepairOutputJsonSchema);
+
+    private static ClusterClassifierInput Input() => new(
+        "sender", "cluster@example.test", "Cluster", "Sender", 10,
+        DateTime.UnixEpoch, DateTime.UnixEpoch, 1, 0, 0, 0, 10, 100, 0, 0, 0, 0,
+        ["Synthetic evidence subject"]);
+
+    private static OllamaChatResponse Chat(string content, long total, long load) => new(
+        content, "thinking trace that must not persist", total, load, 100, 200, 20, 300);
 
     private static OllamaApiClient CreateClient(RecordingHandler handler) => new(
         new HttpClient(handler),
@@ -198,7 +293,48 @@ public sealed class OllamaClientTests
         public Task<OllamaChatResponse> ChatAsync(ClassifierModelProfile profile, ClassifierPromptSnapshot prompt, string evidenceJson, CancellationToken cancellationToken) =>
             Task.FromResult(Response);
 
+        public Task<OllamaChatResponse> RepairAsync(ClassifierModelProfile profile, ClassifierPromptSnapshot prompt, string primaryResponse, CancellationToken cancellationToken) =>
+            Task.FromResult(Response);
+
         public Task<ModelResidency?> GetResidencyAsync(string model, CancellationToken cancellationToken) => Task.FromResult<ModelResidency?>(null);
+        public Task UnloadAsync(string model, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class RepairingApiClient(OllamaChatResponse primary, OllamaChatResponse repair) : IOllamaApiClient
+    {
+        public int RepairCalls { get; private set; }
+        public ClassifierModelProfile? PrimaryProfile { get; private set; }
+        public ClassifierModelProfile? RepairProfile { get; private set; }
+        public string? RepairInput { get; private set; }
+
+        public Task<OllamaChatResponse> ChatAsync(
+            ClassifierModelProfile profile,
+            ClassifierPromptSnapshot prompt,
+            string evidenceJson,
+            CancellationToken cancellationToken)
+        {
+            PrimaryProfile = profile;
+            return Task.FromResult(primary);
+        }
+
+        public Task<OllamaChatResponse> RepairAsync(
+            ClassifierModelProfile profile,
+            ClassifierPromptSnapshot prompt,
+            string primaryResponse,
+            CancellationToken cancellationToken)
+        {
+            RepairCalls++;
+            RepairProfile = profile;
+            RepairInput = primaryResponse;
+            return Task.FromResult(repair);
+        }
+
+        public Task<IReadOnlySet<string>> GetInstalledModelsAsync(CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlySet<string>>(new HashSet<string>());
+
+        public Task<ModelResidency?> GetResidencyAsync(string model, CancellationToken cancellationToken) =>
+            Task.FromResult<ModelResidency?>(null);
+
         public Task UnloadAsync(string model, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

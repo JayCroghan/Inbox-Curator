@@ -16,16 +16,19 @@ namespace InboxCurator.Tests;
 public sealed class ClassifierWebTests
 {
     [Fact]
-    public async Task ClassifierLab_HidesHoldoutActionUntilPromptLockedAndNeverCallsGmail()
+    public async Task ClassifierLab_DefaultsToV2ExplicitCorpusAndNeverExposesHoldoutOrCallsGmail()
     {
         using var factory = new ClassifierFactory();
         using var client = factory.CreateClient();
 
         var initial = await client.GetStringAsync("/Classifier");
         Assert.Contains("Classifier Lab", initial, StringComparison.Ordinal);
+        Assert.Contains(ClassifierPromptV2Definition.Version, initial, StringComparison.Ordinal);
+        Assert.Contains(ClassifierPromptV2Definition.RepairPromptVersion, initial, StringComparison.Ordinal);
         Assert.Contains("Human KEEP", initial, StringComparison.Ordinal);
         Assert.Contains("Model UNWANTED", initial, StringComparison.Ordinal);
-        Assert.Matches("name=\"Stage\" value=\"Holdout\"[^>]*disabled", initial);
+        Assert.Contains("Holdout execution is disabled in MAIL-003A.1", initial, StringComparison.Ordinal);
+        Assert.DoesNotContain("name=\"Stage\" value=\"Holdout\"", initial, StringComparison.Ordinal);
         Assert.Empty(factory.Gmail.ListRequests);
 
         int decisionCount;
@@ -41,7 +44,7 @@ public sealed class ClassifierWebTests
             await using (var db = await dbFactory.CreateDbContextAsync())
             {
                 var prompt = await db.ClassifierPromptVersions.SingleAsync(
-                    item => item.Version == ClassifierPromptDefinition.Version);
+                    item => item.Version == ClassifierPromptV2Definition.Version);
                 db.ClassifierRuns.Add(new ClassifierRun
                 {
                     Id = "web-completed-development",
@@ -56,13 +59,14 @@ public sealed class ClassifierWebTests
                 await db.SaveChangesAsync();
             }
 
-            await scope.ServiceProvider.GetRequiredService<ClassifierPromptService>().LockV1Async(corpus.Id);
+            await scope.ServiceProvider.GetRequiredService<ClassifierPromptService>()
+                .LockAsync(ClassifierPromptV2Definition.Version, corpus.Id);
         }
 
         var locked = await client.GetStringAsync("/Classifier");
         Assert.Contains("Locked", locked, StringComparison.Ordinal);
         Assert.Contains("Pinned corpus:", locked, StringComparison.Ordinal);
-        Assert.DoesNotMatch("name=\"Stage\" value=\"Holdout\"[^>]*disabled", locked);
+        Assert.DoesNotContain("name=\"Stage\" value=\"Holdout\"", locked, StringComparison.Ordinal);
         Assert.Empty(factory.Gmail.ListRequests);
         await using (var scope = factory.Services.CreateAsyncScope())
         {
@@ -90,16 +94,20 @@ public sealed class ClassifierWebTests
     }
 
     [Fact]
-    public async Task SyntheticEvaluation_RendersSafetyGateAndReadOnlyDisagreementEvidence()
+    public async Task SyntheticEvaluation_RendersV2NormalizationAndReadOnlyDisagreementEvidence()
     {
         using var factory = new ClassifierFactory(seedEvaluation: true);
         using var client = factory.CreateClient();
         var html = await client.GetStringAsync("/Classifier");
 
-        Assert.Contains("Safety gate failed", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Preflight", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(ClassifierPromptV2Definition.Version, html, StringComparison.Ordinal);
+        Assert.Contains("NormalizeRepairV2", html, StringComparison.Ordinal);
+        Assert.Contains("Repaired", html, StringComparison.Ordinal);
         Assert.Contains("Disagreements", html, StringComparison.Ordinal);
         Assert.Contains("deepseek-r1-32b-thinking", html, StringComparison.Ordinal);
         Assert.Contains("frozen evidence only", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Primary explanation", html, StringComparison.Ordinal);
         Assert.DoesNotContain("Accept recommendation", html, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(factory.Gmail.ListRequests);
     }

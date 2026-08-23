@@ -1,9 +1,9 @@
 # Inbox Curator — Architecture & Delivery Plan
 
 > **Status:** Active  
-> **Last updated:** 2026-08-23<br>
-> **Current phase:** `MAIL-003A — Local model bakeoff and classifier evaluation lab`<br>
-> **Current execution:** Build the frozen local evaluation corpus and safety-first Ollama bakeoff; the real five-model run is intentionally not part of development.<br>
+> **Last updated:** 2026-08-24<br>
+> **Current phase:** `MAIL-003A.1 — Rich classifier explanations with self-repair normalization`<br>
+> **Current execution:** Preserve the V1 experiment, implement the V2 judgment/normalization protocol, and leave holdout untouched; no real V2 bakeoff runs during development.<br>
 > **Source of truth:** This file should be updated as design decisions or phase status change.
 
 ---
@@ -863,7 +863,7 @@ No Gmail behavior, local policy semantics, audit history, or database schema cha
 
 ## MAIL-003A — Local Model Bakeoff and Classifier Evaluation Lab
 
-**Status: CURRENT**
+**Status: COMPLETE — V1 DEVELOPMENT/VALIDATION RUN RECORDED**
 
 ### Goal
 
@@ -889,6 +889,26 @@ Only SQLite evidence is supplied to the model. Ground truth, decisions, audits, 
 The five initial profiles run without interleaving: Qwen no-think, Gemma default, DeepSeek thinking, Ornith default, and GPT-OSS low. Models are stored on HDD, so Ollama inference has no implicit 100-second HTTP timeout and cold model-load duration is separated from steady-state inference. A fresh measured profile unloads an already-resident exact model before its first request. The lab checks installed models but never pulls or alters them.
 
 Gmail remains exactly `gmail.readonly`; the lab uses SQLite plus local Ollama only.
+
+---
+
+## MAIL-003A.1 — Rich Explanations and Self-Repair Normalization
+
+**Status: CURRENT**
+
+The V1 development/validation run established useful explanation content but was dominated by strict-schema failures—principally `schema_invalid_reason_codes`. Duplicate, excessive, or imperfect diagnostic codes caused otherwise usable judgments to be discarded. The run therefore measured exact serialization compliance more heavily than mailbox judgment. It also exposed a cold-load accounting bug: a roughly four-minute Qwen HDD load appeared as zero when its first primary response later failed validation.
+
+V2 preserves V1 and all historical runs unchanged, reuses an explicitly selected frozen corpus, and separates the protocol into:
+
+1. a relaxed primary response containing the candidate judgment and user-visible audit explanation;
+2. tolerant application normalization for confidence, category, and reason-code diagnostics;
+3. one extraction-only repair call on the same loaded model only when no usable recommendation can be derived directly.
+
+`MAIL-003A-PROMPT-V2`, `MAIL-003A-OUTPUT-V2`, and `MAIL-003A-REPAIR-V1` are immutable and hash-persisted. The complete primary final response and explanation remain local in SQLite; thinking traces are never stored. Duplicate, unknown, missing, or excessive diagnostic fields are non-fatal, while unresolved recommendation extraction is recorded as a normalization failure. Conservative semantic warnings surface recommendation/explanation contradictions without changing the model's judgment.
+
+Primary and repair timing/token metrics are persisted separately. The first returned primary response supplies the cold-load observation even if direct normalization and repair ultimately fail. V1 and V2 remain visibly distinct in the scoreboard.
+
+Development/validation is the only executable stage in MAIL-003A.1. Corpus selection is explicit, holdout items are neither exposed nor executed, and unknown sources remain untouched.
 
 ---
 
