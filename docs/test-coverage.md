@@ -1,10 +1,10 @@
 # Test coverage report
 
-- Run date: 2026-08-19
+- Run date: 2026-08-23
 - Target: .NET 10 (`net10.0`)
 - Test runner: xUnit through Microsoft.NET.Test.Sdk
 - Collector: coverlet XPlat Code Coverage (Cobertura)
-- Result: **42 passed, 0 failed, 0 skipped**
+- Result: **44 passed, 0 failed, 0 skipped**
 
 ## Coverage
 
@@ -31,6 +31,7 @@ The denominator includes generated Razor Page classes and source-generated regul
 - All five human decision types, exact List-ID and sender targets, edit/remove history, future-policy flags, and cutoff validation
 - Separate unreviewed, deferred, and policy-decided states, including default queue movement and zero-coverage Defer semantics
 - Explicit age-cutoff rendering, preservation for existing shortcut/custom dates, deliberate replacement, and affected-count updates
+- Opt-in triage scroll preservation markup plus exact path/query scoping, single-use consumption, and stale-state expiry behavior
 - Coverage calculations, clean-existing temporal boundaries, relationship-evidence precedence, and triage filters
 - Decision persistence through a new `DbContext`, the MAIL-002 migration, and local-only paged cluster detail
 - EF Core migration/startup, synthetic seeding, Razor rendering, and response security headers

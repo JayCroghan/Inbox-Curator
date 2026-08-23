@@ -1,9 +1,9 @@
 # Inbox Curator — Architecture & Delivery Plan
 
 > **Status:** Active  
-> **Last updated:** 2026-08-19  
-> **Current phase:** `MAIL-002 — Human seed decisions`<br>
-> **Current execution:** `MAIL-002` implementation and verification are complete; awaiting review and merge.<br>
+> **Last updated:** 2026-08-23<br>
+> **Current phase:** `MAIL-002.1 — Preserve triage scroll position`<br>
+> **Current execution:** `MAIL-002.1` implementation and verification are complete; awaiting review and merge.<br>
 > **Source of truth:** This file should be updated as design decisions or phase status change.
 
 ---
@@ -42,7 +42,9 @@ The LLM must **never** have Gmail credentials or direct Gmail mutation tools.
 
 `MAIL-001` and `MAIL-001.1` are complete. The first real census validated cluster-first triage: 30,283 messages across 3,632 sender/List-ID sources, including 16,496 unread and 9,583 messages with relationship signals. The highest-volume 24 sources represented approximately 40.2% of indexed mail, and the largest cluster contained 5,900 messages.
 
-`MAIL-002` is the current phase. Human decisions remain exact to one normalized List-ID or fallback sender cluster. Domain-wide rules are intentionally deferred because different streams from the same brand/domain have materially different histories and may need different policies.
+`MAIL-002` is complete. Human decisions remain exact to one normalized List-ID or fallback sender cluster. Domain-wide rules are intentionally deferred because different streams from the same brand/domain have materially different histories and may need different policies.
+
+`MAIL-002.1` preserves the current triage viewport across decision POST/redirect/get cycles using short-lived, query-scoped browser session state. It changes no Gmail, decision, audit, or persistence behavior.
 
 Do **not** skip ahead to LLM classification or Gmail mutation until the read-only census is working and the real mailbox structure has been inspected.
 
@@ -846,6 +848,16 @@ Remain fully local and Gmail read-only. "Quarantine" records intended future act
 The objective is to build a real human-labelled dataset from the user's mailbox.
 
 Do not introduce domain-wide rules in this phase. Explicit human policy has the highest presentation precedence even when a cluster has relationship/thread evidence.
+
+---
+
+## MAIL-002.1 — Preserve Triage Scroll Position
+
+**Status: COMPLETE**
+
+Decision and remove-decision forms opt into lightweight browser-local scroll capture. The record contains the exact return pathname, query string, vertical position, and timestamp; it is consumed after the redirect and ignored when malformed, stale, or scoped to another view. The existing POST/redirect/get workflow remains usable without JavaScript.
+
+No Gmail behavior, local policy semantics, audit history, or database schema changed.
 
 ---
 

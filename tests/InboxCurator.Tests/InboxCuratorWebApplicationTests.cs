@@ -100,6 +100,54 @@ public sealed class InboxCuratorWebApplicationTests
         Assert.Contains("Clean before 20 Jul 2026", html, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task TriageMutationForms_OptIntoScrollPreservationWithoutAffectingOtherForms()
+    {
+        using var factory = new SyntheticInboxCuratorFactory();
+        using var client = factory.CreateClient();
+        var html = await client.GetStringAsync("/?decisionState=all&pageNumber=1&pageSize=10");
+        var forms = Regex.Matches(html, "<form\\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+            .Select(match => match.Value)
+            .ToArray();
+
+        var decideForms = forms.Where(form => form.Contains("handler=Decide", StringComparison.Ordinal)).ToArray();
+        var removeForms = forms.Where(form => form.Contains("handler=RemoveDecision", StringComparison.Ordinal)).ToArray();
+        var unrelatedForms = forms.Except(decideForms).Except(removeForms).ToArray();
+
+        Assert.NotEmpty(decideForms);
+        Assert.NotEmpty(removeForms);
+        Assert.All(decideForms, form => Assert.Contains("data-preserve-triage-scroll", form, StringComparison.Ordinal));
+        Assert.All(removeForms, form => Assert.Contains("data-preserve-triage-scroll", form, StringComparison.Ordinal));
+        Assert.Contains(unrelatedForms, form => form.Contains("method=\"get\"", StringComparison.Ordinal));
+        Assert.Contains(unrelatedForms, form => form.Contains("handler=Scan", StringComparison.Ordinal));
+        Assert.All(unrelatedForms, form => Assert.DoesNotContain("data-preserve-triage-scroll", form, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ScrollRestorationScript_ScopesConsumesAndExpiresStoredState()
+    {
+        using var factory = new SyntheticInboxCuratorFactory();
+        using var client = factory.CreateClient();
+        var script = await client.GetStringAsync("/js/site.js");
+
+        Assert.Contains("form[data-preserve-triage-scroll]", script, StringComparison.Ordinal);
+        Assert.Contains("pathname: target.pathname", script, StringComparison.Ordinal);
+        Assert.Contains("search: target.search", script, StringComparison.Ordinal);
+        Assert.Contains("state.pathname !== window.location.pathname", script, StringComparison.Ordinal);
+        Assert.Contains("state.search !== window.location.search", script, StringComparison.Ordinal);
+        Assert.Contains("age < 0 || age > maxScrollStateAgeMs", script, StringComparison.Ordinal);
+        Assert.Contains("window.addEventListener(\"pageshow\"", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("preventDefault", script, StringComparison.Ordinal);
+
+        var readIndex = script.IndexOf("window.sessionStorage.getItem(scrollStateKey)", StringComparison.Ordinal);
+        var removeIndex = script.IndexOf("window.sessionStorage.removeItem(scrollStateKey)", readIndex, StringComparison.Ordinal);
+        var parseIndex = script.IndexOf("JSON.parse(serializedState)", StringComparison.Ordinal);
+        var restoreIndex = script.IndexOf("window.scrollTo", StringComparison.Ordinal);
+        Assert.True(readIndex >= 0 && readIndex < removeIndex);
+        Assert.True(removeIndex < parseIndex, "Stored state should be consumed before it is parsed or restored.");
+        Assert.True(parseIndex < restoreIndex);
+    }
+
     private static async Task<string> PostAgeDecisionAsync(
         HttpClient client,
         string html,
