@@ -109,6 +109,11 @@ public sealed class InboxCuratorDbContext(DbContextOptions<InboxCuratorDbContext
         prompts.Property(prompt => prompt.Version).HasMaxLength(64);
         prompts.Property(prompt => prompt.SystemPromptSha256).HasMaxLength(64);
         prompts.Property(prompt => prompt.OutputSchemaVersion).HasMaxLength(64);
+        prompts.HasIndex(prompt => prompt.LockedEvaluationCorpusId);
+        prompts.HasOne(prompt => prompt.LockedEvaluationCorpus)
+            .WithMany(corpus => corpus.LockedPromptVersions)
+            .HasForeignKey(prompt => prompt.LockedEvaluationCorpusId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         var runs = modelBuilder.Entity<ClassifierRun>();
         runs.ToTable("ClassifierRuns");

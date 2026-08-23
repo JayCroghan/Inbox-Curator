@@ -23,7 +23,8 @@ builder.Services.AddSingleton<ScanCoordinator>();
 builder.Services.AddSingleton<IScanTrigger>(services => services.GetRequiredService<ScanCoordinator>());
 builder.Services.AddHostedService(services => services.GetRequiredService<ScanCoordinator>());
 builder.Services.AddSingleton<IOllamaRetryDelay, SystemOllamaRetryDelay>();
-builder.Services.AddHttpClient<IOllamaApiClient, OllamaApiClient>();
+builder.Services.AddHttpClient<IOllamaApiClient, OllamaApiClient>(client =>
+    client.Timeout = Timeout.InfiniteTimeSpan);
 builder.Services.AddSingleton<OllamaClusterClassifier>();
 builder.Services.AddSingleton<IClusterClassifier>(services => services.GetRequiredService<OllamaClusterClassifier>());
 builder.Services.AddSingleton<ILocalModelRuntime>(services => services.GetRequiredService<OllamaClusterClassifier>());

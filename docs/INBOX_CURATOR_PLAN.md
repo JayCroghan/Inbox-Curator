@@ -882,11 +882,11 @@ Measure which installed local Ollama model/profile best reproduces explicit huma
 
 ### Evaluation
 
-The primary metric is `HUMAN KEEP -> MODEL UNWANTED`. Any high-confidence occurrence on locked holdout fails the safety gate. High-confidence unwanted precision, abstention rate, decisive coverage, binary accuracy excluding abstentions, schema/request failures, steady-state latency, throughput, cold load, and VRAM residency remain visible. The UI does not choose a winner.
+The primary metric is `HUMAN KEEP -> MODEL UNWANTED`. Any high-confidence occurrence on locked holdout fails the safety gate. A holdout profile remains incomplete until every expected item has a valid result with no request/schema failures; development remains preflight. Prompt locking requires a completed development/validation run and pins V1 to that frozen corpus so later corpora cannot replace its holdout. High-confidence unwanted precision, abstention rate, decisive coverage, binary accuracy excluding abstentions, schema/request failures, steady-state latency, throughput, cold load, and VRAM residency remain visible. The UI does not choose a winner.
 
 Only SQLite evidence is supplied to the model. Ground truth, decisions, audits, mailbox coverage, bodies, attachment contents, Gmail credentials/tools, shell/browser tools, and other model outputs are excluded. Sender/list strings and subjects are explicitly untrusted data.
 
-The five initial profiles run without interleaving: Qwen no-think, Gemma default, DeepSeek thinking, Ornith default, and GPT-OSS low. Models are stored on HDD, so cold model-load duration is separated from steady-state inference. The lab checks installed models but never pulls or alters them.
+The five initial profiles run without interleaving: Qwen no-think, Gemma default, DeepSeek thinking, Ornith default, and GPT-OSS low. Models are stored on HDD, so Ollama inference has no implicit 100-second HTTP timeout and cold model-load duration is separated from steady-state inference. A fresh measured profile unloads an already-resident exact model before its first request. The lab checks installed models but never pulls or alters them.
 
 Gmail remains exactly `gmail.readonly`; the lab uses SQLite plus local Ollama only.
 

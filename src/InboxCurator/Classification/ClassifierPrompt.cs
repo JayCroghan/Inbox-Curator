@@ -92,18 +92,44 @@ public sealed class ClassifierPromptService(
         return prompt;
     }
 
-    public async Task LockV1Async(CancellationToken cancellationToken = default)
+    public async Task LockV1Async(long evaluationCorpusId, CancellationToken cancellationToken = default)
     {
         await EnsureV1Async(cancellationToken);
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
         var prompt = await db.ClassifierPromptVersions.SingleAsync(
             item => item.Version == ClassifierPromptDefinition.Version,
             cancellationToken);
-        if (!prompt.IsLocked)
+
+        if (prompt.LockedEvaluationCorpusId.HasValue)
         {
-            prompt.IsLocked = true;
-            prompt.LockedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
-            await db.SaveChangesAsync(cancellationToken);
+            if (prompt.LockedEvaluationCorpusId.Value != evaluationCorpusId)
+            {
+                throw new InvalidOperationException(
+                    $"{ClassifierPromptDefinition.Version} is already locked to corpus {prompt.LockedEvaluationCorpusId.Value}.");
+            }
+
+            return;
         }
+
+        var corpus = await db.EvaluationCorpora.SingleOrDefaultAsync(
+            item => item.Id == evaluationCorpusId,
+            cancellationToken)
+            ?? throw new InvalidOperationException("The selected evaluation corpus no longer exists.");
+        var hasCompletedDevelopmentRun = await db.ClassifierRuns.AnyAsync(
+            run => run.EvaluationCorpusId == corpus.Id &&
+                run.ClassifierPromptVersionId == prompt.Id &&
+                run.Stage == ClassifierRunStage.DevelopmentValidation &&
+                run.State == ClassifierRunState.Completed,
+            cancellationToken);
+        if (!hasCompletedDevelopmentRun)
+        {
+            throw new InvalidOperationException(
+                $"Complete a development + validation run for corpus {corpus.Version} before locking the prompt.");
+        }
+
+        prompt.IsLocked = true;
+        prompt.LockedAtUtc ??= timeProvider.GetUtcNow().UtcDateTime;
+        prompt.LockedEvaluationCorpusId = corpus.Id;
+        await db.SaveChangesAsync(cancellationToken);
     }
 }

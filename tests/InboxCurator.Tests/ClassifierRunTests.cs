@@ -26,10 +26,14 @@ public sealed class ClassifierRunTests
 
         Assert.Equal(
             [
+                "residency:model-a",
+                "unload:model-a",
                 "classify:profile-a:list-0.example",
                 "residency:model-a",
                 "classify:profile-a:sender-1@example.test",
                 "unload:model-a",
+                "residency:model-b",
+                "unload:model-b",
                 "classify:profile-b:list-0.example",
                 "residency:model-b",
                 "classify:profile-b:sender-1@example.test",
@@ -155,6 +159,100 @@ public sealed class ClassifierRunTests
         Assert.Equal("model_unload_failed", run.FailureCode);
     }
 
+    [Fact]
+    public async Task PromptLock_RequiresCompletedDevelopmentRunAndPinsHoldoutToThatCorpus()
+    {
+        await using var store = new SqliteTestStore();
+        await store.InitializeAsync();
+        var promptService = new ClassifierPromptService(store.Factory, TimeProvider.System);
+        var prompt = await promptService.EnsureV1Async();
+        long corpusAId;
+        long corpusAHoldoutItemId;
+        await using (var db = await store.Factory.CreateDbContextAsync())
+        {
+            var corpusA = Corpus("corpus-a", DateTime.UtcNow.AddMinutes(-5));
+            var developmentItem = Item(ClusterTargetType.ListId, "development-a.example", EvaluationGroundTruth.Keep);
+            developmentItem.Split = EvaluationSplit.Development;
+            var holdoutItem = Item(ClusterTargetType.Sender, "holdout-a@example.test", EvaluationGroundTruth.Unwanted);
+            holdoutItem.Split = EvaluationSplit.Holdout;
+            corpusA.Items.Add(developmentItem);
+            corpusA.Items.Add(holdoutItem);
+            db.EvaluationCorpora.Add(corpusA);
+            await db.SaveChangesAsync();
+            corpusAId = corpusA.Id;
+            corpusAHoldoutItemId = holdoutItem.Id;
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => promptService.LockV1Async(corpusAId));
+
+        await using (var db = await store.Factory.CreateDbContextAsync())
+        {
+            db.ClassifierRuns.Add(new ClassifierRun
+            {
+                Id = "completed-development-a",
+                EvaluationCorpusId = corpusAId,
+                ClassifierPromptVersionId = prompt.Id,
+                Stage = ClassifierRunStage.DevelopmentValidation,
+                State = ClassifierRunState.Completed,
+                TotalItems = 1,
+                CompletedItems = 1,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
+                CompletedAtUtc = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await promptService.LockV1Async(corpusAId);
+
+        await using (var db = await store.Factory.CreateDbContextAsync())
+        {
+            var locked = await db.ClassifierPromptVersions.SingleAsync(item => item.Id == prompt.Id);
+            Assert.True(locked.IsLocked);
+            Assert.Equal(corpusAId, locked.LockedEvaluationCorpusId);
+
+            var corpusB = Corpus("corpus-b", DateTime.UtcNow.AddMinutes(5));
+            var holdoutB = Item(ClusterTargetType.Sender, "holdout-b@example.test", EvaluationGroundTruth.Keep);
+            holdoutB.Split = EvaluationSplit.Holdout;
+            corpusB.Items.Add(holdoutB);
+            db.EvaluationCorpora.Add(corpusB);
+            await db.SaveChangesAsync();
+        }
+
+        var queue = new RecordingQueue();
+        var runService = new ClassifierRunService(
+            store.Factory,
+            Options.Create(new OllamaOptions
+            {
+                Profiles = [new OllamaModelProfile { Key = "profile-a", Model = "model-a" }]
+            }),
+            queue,
+            TimeProvider.System);
+        var holdoutRunId = await runService.CreateAsync(
+            ClassifierRunStage.Holdout,
+            ["profile-a"],
+            CancellationToken.None);
+
+        var events = new List<string>();
+        var executor = new ClassifierRunExecutor(
+            store.Factory,
+            new RecordingClassifier(events),
+            new RecordingRuntime(events, new HashSet<string> { "model-a" }),
+            TimeProvider.System,
+            NullLogger<ClassifierRunExecutor>.Instance);
+        await executor.ExecuteAsync(holdoutRunId, CancellationToken.None);
+
+        await using var verification = await store.Factory.CreateDbContextAsync();
+        var holdoutRun = await verification.ClassifierRuns.SingleAsync(item => item.Id == holdoutRunId);
+        Assert.Equal(corpusAId, holdoutRun.EvaluationCorpusId);
+        Assert.Equal(1, holdoutRun.TotalItems);
+        var result = await verification.ClassifierResults
+            .Include(item => item.EvaluationCorpusItem)
+            .SingleAsync(item => item.ClassifierRunId == holdoutRunId);
+        Assert.Equal(corpusAHoldoutItemId, result.EvaluationCorpusItemId);
+        Assert.Equal(corpusAId, result.EvaluationCorpusItem.EvaluationCorpusId);
+    }
+
     private static async Task<string> SeedRunAsync(SqliteTestStore store, bool lockedPrompt, bool includeRun = true)
     {
         await using var db = await store.Factory.CreateDbContextAsync();
@@ -214,6 +312,14 @@ public sealed class ClassifierRunTests
         FirstReceivedUtc = DateTime.UtcNow.AddDays(-10),
         LastReceivedUtc = DateTime.UtcNow,
         RepresentativeSubjectsJson = "[\"Synthetic subject\"]"
+    };
+
+    private static EvaluationCorpus Corpus(string version, DateTime createdAtUtc) => new()
+    {
+        Version = version,
+        CreatedAtUtc = createdAtUtc,
+        SplitStrategy = EvaluationCorpusService.SplitStrategy,
+        EligibleSourceCount = 2
     };
 
     private static ClassifierRunProfile Profile(string runId, string key, string model, int order) => new()

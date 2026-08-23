@@ -47,10 +47,18 @@ public sealed class ClassifierModel(
         return RedirectToPage();
     }
 
-    public async Task<IActionResult> OnPostLockPromptAsync(CancellationToken cancellationToken)
+    public async Task<IActionResult> OnPostLockPromptAsync(long corpusId, CancellationToken cancellationToken)
     {
-        await prompts.LockV1Async(cancellationToken);
-        Notice = $"{ClassifierPromptDefinition.Version} is locked. Holdout execution is now available.";
+        try
+        {
+            await prompts.LockV1Async(corpusId, cancellationToken);
+            Notice = $"{ClassifierPromptDefinition.Version} is locked to corpus {corpusId}. Holdout execution is now available.";
+        }
+        catch (InvalidOperationException exception)
+        {
+            Notice = exception.Message;
+        }
+
         return RedirectToPage();
     }
 

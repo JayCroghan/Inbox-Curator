@@ -1,17 +1,17 @@
 # Test coverage report
 
-- Run date: 2026-08-23
+- Run date: 2026-08-24
 - Target: .NET 10 (`net10.0`)
 - Test runner: xUnit through Microsoft.NET.Test.Sdk
 - Collector: coverlet XPlat Code Coverage (Cobertura)
-- Result: **60 passed, 0 failed, 0 skipped**
+- Result: **68 passed, 0 failed, 0 skipped**
 
 ## Coverage
 
 | Metric | Covered | Valid | Rate |
 | --- | ---: | ---: | ---: |
-| Lines | 4,932 | 5,364 | **91.94%** |
-| Branches | 1,043 | 1,408 | **74.07%** |
+| Lines | 5,845 | 6,300 | **92.77%** |
+| Branches | 1,073 | 1,446 | **74.20%** |
 
 The denominator includes generated Razor Page classes and source-generated regular-expression code. Gmail's live installed-app/browser authorization and real network transport are deliberately not exercised by the offline suite; the OAuth scope, transient-status classification, delay curve, metadata mapping, and scanner behavior are tested at their local boundaries.
 
@@ -39,10 +39,11 @@ The denominator includes generated Razor Page classes and source-generated regul
 - Deterministic oldest/newest/time-distributed subject sampling and fixed-seed stratified development/validation/holdout assignment
 - Prompt-injection subjects remain inert untrusted input under the immutable `MAIL-003A-PROMPT-V1` contract
 - Strict structured-output enum/domain validation, including rejection of numeric confidence and unexpected fields
-- Dangerous KEEP → UNWANTED, high-confidence safety gate, unwanted precision, abstention, coverage, and steady-state performance scoring
-- Ollama installed-model checks without pulls, actual JSON Schema payloads, exact five-profile think modes, metrics, `/api/ps` residency, and `keep_alive=0` unload
-- Model-at-a-time execution order, durable item failures, resume skipping, cancellation state, and explicit unload boundaries
-- Locked-holdout web controls, synthetic safety scoreboard/disagreement rendering, no recommendation acceptance, and no Gmail calls from the classifier page
+- Dangerous KEEP → UNWANTED, high-confidence safety gate, incomplete holdout states, unwanted precision, abstention, coverage, and steady-state performance scoring
+- Ollama installed-model checks without pulls, infinite inference HTTP timeout with caller cancellation, actual JSON Schema payloads, exact five-profile think modes, metrics, `/api/ps` residency, and `keep_alive=0` unload
+- Model-at-a-time execution order, resident-model cold-load preconditioning, durable item failures, resume skipping, cancellation state, and explicit unload boundaries
+- Completed-development prerequisite and durable prompt/corpus pinning, including holdout isolation from later corpora
+- Locked-holdout web controls and pinned-corpus display, synthetic safety scoreboard/disagreement rendering, no recommendation acceptance, and no Gmail calls from the classifier page
 
 ## Reproduce
 

@@ -110,6 +110,33 @@ public sealed class OllamaClientTests
         Assert.DoesNotContain(api.Response.Thinking!, JsonSerializer.Serialize(response), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Chat_DisablesHttpClientTimeoutAndStillHonorsCallerCancellation()
+    {
+        var handler = new LongRunningChatHandler();
+        using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(10) };
+        var client = new OllamaApiClient(
+            httpClient,
+            Options.Create(new OllamaOptions { BaseUrl = "http://127.0.0.1:11434", MaxRetryAttempts = 1 }),
+            new NoDelay());
+        var profile = new ClassifierModelProfile("profile", "model", null, 0, 8192, false, "30m");
+        var prompt = new ClassifierPromptSnapshot(
+            ClassifierPromptDefinition.Version,
+            ClassifierPromptDefinition.SystemPrompt,
+            ClassifierPromptDefinition.SystemPromptSha256,
+            ClassifierPromptDefinition.OutputSchemaVersion,
+            ClassifierPromptDefinition.OutputJsonSchema);
+
+        var completed = await client.ChatAsync(profile, prompt, "{\"messageCount\":10}", CancellationToken.None);
+
+        Assert.Equal(Timeout.InfiniteTimeSpan, httpClient.Timeout);
+        Assert.NotNull(completed.Content);
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(25));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            client.ChatAsync(profile, prompt, "{\"messageCount\":10}", cancellation.Token));
+    }
+
     private static OllamaApiClient CreateClient(RecordingHandler handler) => new(
         new HttpClient(handler),
         Options.Create(new OllamaOptions { BaseUrl = "http://127.0.0.1:11434", MaxRetryAttempts = 1 }),
@@ -134,6 +161,27 @@ public sealed class OllamaClientTests
             var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
             Requests.Add((request.RequestUri!.AbsolutePath, body));
             return responseFactory(request);
+        }
+    }
+
+    private sealed class LongRunningChatHandler : HttpMessageHandler
+    {
+        private int callCount;
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref callCount) == 1)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(75), cancellationToken);
+                return Json("""
+                    {"message":{"content":"{\"recommendation\":\"keep\",\"confidence\":\"high\",\"category\":\"professional\",\"reasonCodes\":[\"professional_content\"],\"rationale\":\"Useful professional evidence.\"}"}}
+                    """);
+            }
+
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Cancellation should stop the synthetic request.");
         }
     }
 

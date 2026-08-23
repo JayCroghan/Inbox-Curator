@@ -38,12 +38,22 @@ public sealed record OllamaChatResponse(
     int? EvalCount,
     long? EvalDurationNanoseconds);
 
-public sealed class OllamaApiClient(
-    HttpClient httpClient,
-    IOptions<OllamaOptions> options,
-    IOllamaRetryDelay retryDelay) : IOllamaApiClient
+public sealed class OllamaApiClient : IOllamaApiClient
 {
-    private readonly OllamaOptions _options = options.Value;
+    private readonly HttpClient httpClient;
+    private readonly OllamaOptions _options;
+    private readonly IOllamaRetryDelay retryDelay;
+
+    public OllamaApiClient(
+        HttpClient httpClient,
+        IOptions<OllamaOptions> options,
+        IOllamaRetryDelay retryDelay)
+    {
+        this.httpClient = httpClient;
+        this.httpClient.Timeout = Timeout.InfiniteTimeSpan;
+        _options = options.Value;
+        this.retryDelay = retryDelay;
+    }
 
     public async Task<IReadOnlySet<string>> GetInstalledModelsAsync(CancellationToken cancellationToken)
     {

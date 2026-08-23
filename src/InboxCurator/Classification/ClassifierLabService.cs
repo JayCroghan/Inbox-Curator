@@ -26,7 +26,12 @@ public sealed record PromptLabSummary(
     string Hash,
     string SchemaVersion,
     bool IsLocked,
-    DateTime? LockedAtUtc);
+    DateTime? LockedAtUtc,
+    long? LockedEvaluationCorpusId,
+    string? LockedEvaluationCorpusVersion)
+{
+    public bool IsHoldoutReady => IsLocked && LockedEvaluationCorpusId.HasValue;
+}
 
 public sealed record ModelProfileLabSummary(
     string Key,
@@ -118,6 +123,7 @@ public sealed class ClassifierLabService(
             .OrderByDescending(item => item.CreatedAtUtc)
             .FirstOrDefaultAsync(cancellationToken);
         var prompt = await db.ClassifierPromptVersions.AsNoTracking()
+            .Include(item => item.LockedEvaluationCorpus)
             .SingleAsync(item => item.Version == ClassifierPromptDefinition.Version, cancellationToken);
 
         IReadOnlySet<string>? installed = null;
@@ -159,7 +165,8 @@ public sealed class ClassifierLabService(
         var disagreements = Array.Empty<ClassifierDisagreement>();
         var disagreementCount = 0;
         var pageCount = 0;
-        var holdoutDetailsVisible = selectedRunSummary?.Stage != ClassifierRunStage.Holdout || prompt.IsLocked;
+        var holdoutDetailsVisible = selectedRunSummary?.Stage != ClassifierRunStage.Holdout ||
+            (prompt.IsLocked && prompt.LockedEvaluationCorpusId.HasValue);
 
         if (selectedRunSummary is not null)
         {
@@ -182,6 +189,12 @@ public sealed class ClassifierLabService(
                     item.EvalDurationNanoseconds
                 })
                 .ToArrayAsync(cancellationToken);
+            var expectedItemCount = await db.EvaluationCorpusItems.AsNoTracking().CountAsync(
+                item => item.EvaluationCorpusId == run.EvaluationCorpusId &&
+                    (run.Stage == ClassifierRunStage.Holdout
+                        ? item.Split == EvaluationSplit.Holdout
+                        : item.Split != EvaluationSplit.Holdout),
+                cancellationToken);
             scores = SortScores(run.Profiles
                 .OrderBy(item => item.ExecutionOrder)
                 .Select(profile => EvaluationScoreCalculator.Calculate(
@@ -198,7 +211,8 @@ public sealed class ClassifierLabService(
                             item.PromptEvalCount,
                             item.EvalCount,
                             item.EvalDurationNanoseconds))
-                        .ToArray()))
+                        .ToArray(),
+                    expectedItemCount))
                 .ToArray(), scoreSort, direction);
 
             if (holdoutDetailsVisible)
@@ -283,7 +297,14 @@ public sealed class ClassifierLabService(
             corpus.SplitStrategy);
         return new ClassifierLabSnapshot(
             corpusSummary,
-            new PromptLabSummary(prompt.Version, prompt.SystemPromptSha256, prompt.OutputSchemaVersion, prompt.IsLocked, prompt.LockedAtUtc),
+            new PromptLabSummary(
+                prompt.Version,
+                prompt.SystemPromptSha256,
+                prompt.OutputSchemaVersion,
+                prompt.IsLocked,
+                prompt.LockedAtUtc,
+                prompt.LockedEvaluationCorpusId,
+                prompt.LockedEvaluationCorpus?.Version),
             profiles,
             installed is not null,
             selectedRunSummary,

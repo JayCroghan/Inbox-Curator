@@ -57,16 +57,21 @@
             <header><span>02</span><h2>Prompt contract</h2></header>
             <strong class="lab-key-value">@Model.Snapshot.Prompt.Version</strong>
             <p class="prompt-state @(Model.Snapshot.Prompt.IsLocked ? "is-locked" : "")">
-                @(Model.Snapshot.Prompt.IsLocked ? "Locked" : "Open for development")
+                @(Model.Snapshot.Prompt.IsHoldoutReady ? "Locked" : Model.Snapshot.Prompt.IsLocked ? "Lock requires corpus pin" : "Open for development")
             </p>
             <dl class="lab-mini-grid">
                 <div><dt>Schema</dt><dd>@Model.Snapshot.Prompt.SchemaVersion</dd></div>
                 <div class="wide"><dt>SHA-256</dt><dd class="hash-value">@Model.Snapshot.Prompt.Hash</dd></div>
             </dl>
+            @if (Model.Snapshot.Prompt.IsHoldoutReady)
+            {
+                <p class="lab-micro"><strong>Pinned corpus:</strong> @Model.Snapshot.Prompt.LockedEvaluationCorpusVersion · ID @Model.Snapshot.Prompt.LockedEvaluationCorpusId</p>
+            }
             <p class="lab-micro">Mailbox strings are explicitly untrusted data. V1 contains no human-label examples.</p>
-            @if (!Model.Snapshot.Prompt.IsLocked)
+            @if (!Model.Snapshot.Prompt.IsHoldoutReady && Model.Snapshot.Corpus is { } lockCorpus)
             {
                 <form method="post" asp-page-handler="LockPrompt">
+                    <input type="hidden" name="corpusId" value="@lockCorpus.Id" />
                     <button class="lab-secondary-button" type="submit">Lock prompt for holdout</button>
                 </form>
             }
@@ -104,7 +109,7 @@
             </fieldset>
             <div class="run-actions">
                 <button type="submit" name="Stage" value="DevelopmentValidation" @(Model.Snapshot.Corpus is null || selectedRun?.IsActive == true ? "disabled" : null)>Run development + validation</button>
-                <button class="holdout-button" type="submit" name="Stage" value="Holdout" @(!Model.Snapshot.Prompt.IsLocked || Model.Snapshot.Corpus is null || selectedRun?.IsActive == true ? "disabled" : null)>Run locked holdout</button>
+                <button class="holdout-button" type="submit" name="Stage" value="Holdout" @(!Model.Snapshot.Prompt.IsHoldoutReady || selectedRun?.IsActive == true ? "disabled" : null)>Run locked holdout</button>
             </div>
         </form>
     </section>

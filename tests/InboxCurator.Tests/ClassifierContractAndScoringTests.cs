@@ -44,6 +44,7 @@ public sealed class ClassifierContractAndScoringTests
             SizeVramBytes = 80,
             PredominantlyVramResident = false,
             ColdLoadDurationNanoseconds = 40_000_000_000,
+            State = ClassifierProfileState.Completed,
             StartedAtUtc = DateTime.UtcNow,
             CompletedAtUtc = DateTime.UtcNow.AddMinutes(1)
         };
@@ -64,7 +65,7 @@ public sealed class ClassifierContractAndScoringTests
             new EvaluationScoredItem(EvaluationGroundTruth.Keep, ClassifierResultStatus.RequestFailure, null, null, false, null, null, null, null)
         };
 
-        var score = EvaluationScoreCalculator.Calculate(run, profile, items);
+        var score = EvaluationScoreCalculator.Calculate(run, profile, items, items.Length);
 
         Assert.Equal(SafetyGateStatus.Failed, score.SafetyGate);
         Assert.Equal(1, score.KeepToUnwantedCount);
@@ -101,6 +102,106 @@ public sealed class ClassifierContractAndScoringTests
             ClassifierRecommendation.Unwanted, ClassifierConfidence.High,
             false, null, null, null, null);
 
-        Assert.Equal(SafetyGateStatus.Preflight, EvaluationScoreCalculator.Calculate(run, profile, [result]).SafetyGate);
+        Assert.Equal(SafetyGateStatus.Preflight, EvaluationScoreCalculator.Calculate(run, profile, [result], 1).SafetyGate);
     }
+
+    [Fact]
+    public void PartialActiveHoldout_IsIncomplete()
+    {
+        Assert.Equal(SafetyGateStatus.Incomplete, Gate(
+            ClassifierRunState.Running,
+            ClassifierProfileState.Running,
+            [Completed(EvaluationGroundTruth.Keep, ClassifierRecommendation.Keep)],
+            expectedItemCount: 2));
+    }
+
+    [Fact]
+    public void HoldoutWithRequestFailure_IsIncomplete()
+    {
+        Assert.Equal(SafetyGateStatus.Incomplete, Gate(
+            ClassifierRunState.Completed,
+            ClassifierProfileState.Completed,
+            [
+                Completed(EvaluationGroundTruth.Keep, ClassifierRecommendation.Keep),
+                Failure(EvaluationGroundTruth.Unwanted, ClassifierResultStatus.RequestFailure)
+            ],
+            expectedItemCount: 2));
+    }
+
+    [Fact]
+    public void HoldoutWithSchemaFailure_IsIncomplete()
+    {
+        Assert.Equal(SafetyGateStatus.Incomplete, Gate(
+            ClassifierRunState.Completed,
+            ClassifierProfileState.Completed,
+            [Failure(EvaluationGroundTruth.Keep, ClassifierResultStatus.SchemaFailure)],
+            expectedItemCount: 1));
+    }
+
+    [Fact]
+    public void HoldoutWithMissingModel_IsIncomplete()
+    {
+        Assert.Equal(SafetyGateStatus.Incomplete, Gate(
+            ClassifierRunState.Completed,
+            ClassifierProfileState.Missing,
+            [Failure(EvaluationGroundTruth.Keep, ClassifierResultStatus.RequestFailure)],
+            expectedItemCount: 1));
+    }
+
+    [Fact]
+    public void CleanFullyCompletedHoldout_Passes()
+    {
+        Assert.Equal(SafetyGateStatus.Passed, Gate(
+            ClassifierRunState.Completed,
+            ClassifierProfileState.Completed,
+            [
+                Completed(EvaluationGroundTruth.Keep, ClassifierRecommendation.Keep),
+                Completed(EvaluationGroundTruth.Unwanted, ClassifierRecommendation.Unwanted)
+            ],
+            expectedItemCount: 2));
+    }
+
+    [Fact]
+    public void HighConfidenceDangerousHoldout_FailsEvenBeforeCompletion()
+    {
+        Assert.Equal(SafetyGateStatus.Failed, Gate(
+            ClassifierRunState.Running,
+            ClassifierProfileState.Running,
+            [Completed(EvaluationGroundTruth.Keep, ClassifierRecommendation.Unwanted, ClassifierConfidence.High)],
+            expectedItemCount: 2));
+    }
+
+    private static SafetyGateStatus Gate(
+        ClassifierRunState runState,
+        ClassifierProfileState profileState,
+        IReadOnlyCollection<EvaluationScoredItem> items,
+        int expectedItemCount)
+    {
+        var run = new ClassifierRun
+        {
+            Id = "gate-run",
+            Stage = ClassifierRunStage.Holdout,
+            State = runState,
+            CreatedAtUtc = DateTime.UtcNow,
+            UpdatedAtUtc = DateTime.UtcNow
+        };
+        var profile = new ClassifierRunProfile
+        {
+            ClassifierRunId = run.Id,
+            ProfileKey = "gate-profile",
+            ModelName = "model",
+            KeepAlive = "30m",
+            State = profileState
+        };
+        return EvaluationScoreCalculator.Calculate(run, profile, items, expectedItemCount).SafetyGate;
+    }
+
+    private static EvaluationScoredItem Completed(
+        EvaluationGroundTruth truth,
+        ClassifierRecommendation recommendation,
+        ClassifierConfidence confidence = ClassifierConfidence.Medium) =>
+        new(truth, ClassifierResultStatus.Completed, recommendation, confidence, false, null, null, null, null);
+
+    private static EvaluationScoredItem Failure(EvaluationGroundTruth truth, ClassifierResultStatus status) =>
+        new(truth, status, null, null, false, null, null, null, null);
 }

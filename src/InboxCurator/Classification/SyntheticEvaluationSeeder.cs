@@ -33,8 +33,8 @@ public sealed class SyntheticEvaluationSeeder(
             ClusterTargetType.ListId, "daily.ledger.example", ClusterDecisionKind.UnwantedExistingAndFuture), cancellationToken);
 
         var corpus = await corpora.CreateAsync(cancellationToken);
-        await prompts.LockV1Async(cancellationToken);
         await SeedRunAsync(corpus.Id, ClassifierRunStage.DevelopmentValidation, new DateTime(2026, 8, 23, 7, 20, 0, DateTimeKind.Utc), cancellationToken);
+        await prompts.LockV1Async(corpus.Id, cancellationToken);
         await SeedRunAsync(corpus.Id, ClassifierRunStage.Holdout, new DateTime(2026, 8, 23, 8, 5, 0, DateTimeKind.Utc), cancellationToken);
     }
 

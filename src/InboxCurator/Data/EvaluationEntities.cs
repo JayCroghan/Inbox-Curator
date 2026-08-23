@@ -112,6 +112,7 @@ public sealed class EvaluationCorpus
     public int ExcludedMissingEvidenceCount { get; set; }
     public ICollection<EvaluationCorpusItem> Items { get; } = [];
     public ICollection<ClassifierRun> Runs { get; } = [];
+    public ICollection<ClassifierPromptVersion> LockedPromptVersions { get; } = [];
 }
 
 public sealed class EvaluationCorpusItem
@@ -150,6 +151,8 @@ public sealed class ClassifierPromptVersion
     public bool IsLocked { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? LockedAtUtc { get; set; }
+    public long? LockedEvaluationCorpusId { get; set; }
+    public EvaluationCorpus? LockedEvaluationCorpus { get; set; }
     public ICollection<ClassifierRun> Runs { get; } = [];
 }
 

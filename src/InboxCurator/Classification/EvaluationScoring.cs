@@ -5,6 +5,7 @@ namespace InboxCurator.Classification;
 public enum SafetyGateStatus
 {
     Preflight,
+    Incomplete,
     Passed,
     Failed
 }
@@ -60,7 +61,8 @@ public static class EvaluationScoreCalculator
     public static ClassifierScore Calculate(
         ClassifierRun run,
         ClassifierRunProfile profile,
-        IReadOnlyCollection<EvaluationScoredItem> items)
+        IReadOnlyCollection<EvaluationScoredItem> items,
+        int expectedItemCount)
     {
         var completed = items.Where(item => item.Status == ClassifierResultStatus.Completed).ToArray();
         var decisive = completed.Where(item => item.Recommendation is
@@ -94,6 +96,13 @@ public static class EvaluationScoreCalculator
         var vramPercentage = profile.ModelSizeBytes > 0 && profile.SizeVramBytes.HasValue
             ? Math.Clamp(profile.SizeVramBytes.Value * 100d / profile.ModelSizeBytes.Value, 0, 100)
             : (double?)null;
+        var safetyGate = SafetyGate(
+            run,
+            profile,
+            items,
+            completed.Length,
+            expectedItemCount,
+            highConfidenceDangerous);
 
         return new ClassifierScore(
             run.Id,
@@ -101,9 +110,7 @@ public static class EvaluationScoreCalculator
             profile.ProfileKey,
             profile.ModelName,
             run.Stage,
-            run.Stage == ClassifierRunStage.Holdout
-                ? highConfidenceDangerous > 0 ? SafetyGateStatus.Failed : SafetyGateStatus.Passed
-                : SafetyGateStatus.Preflight,
+            safetyGate,
             items.Count(item => item.GroundTruth == EvaluationGroundTruth.Keep),
             items.Count(item => item.GroundTruth == EvaluationGroundTruth.Unwanted),
             completed.Count(item => item.Recommendation == ClassifierRecommendation.Keep),
@@ -135,6 +142,32 @@ public static class EvaluationScoreCalculator
                 : null,
             vramPercentage,
             profile.PredominantlyVramResident);
+    }
+
+    private static SafetyGateStatus SafetyGate(
+        ClassifierRun run,
+        ClassifierRunProfile profile,
+        IReadOnlyCollection<EvaluationScoredItem> items,
+        int completedCount,
+        int expectedItemCount,
+        int highConfidenceDangerous)
+    {
+        if (run.Stage != ClassifierRunStage.Holdout)
+        {
+            return SafetyGateStatus.Preflight;
+        }
+
+        if (highConfidenceDangerous > 0)
+        {
+            return SafetyGateStatus.Failed;
+        }
+
+        var completeAndValid = run.State == ClassifierRunState.Completed &&
+            profile.State == ClassifierProfileState.Completed &&
+            expectedItemCount > 0 &&
+            items.Count == expectedItemCount &&
+            completedCount == expectedItemCount;
+        return completeAndValid ? SafetyGateStatus.Passed : SafetyGateStatus.Incomplete;
     }
 
     private static double? Percentage(int numerator, int denominator) =>

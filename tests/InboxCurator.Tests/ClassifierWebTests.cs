@@ -37,12 +37,31 @@ public sealed class ClassifierWebTests
                 decisionCount = await db.ClusterDecisions.CountAsync();
             }
 
-            await scope.ServiceProvider.GetRequiredService<EvaluationCorpusService>().CreateAsync();
-            await scope.ServiceProvider.GetRequiredService<ClassifierPromptService>().LockV1Async();
+            var corpus = await scope.ServiceProvider.GetRequiredService<EvaluationCorpusService>().CreateAsync();
+            await using (var db = await dbFactory.CreateDbContextAsync())
+            {
+                var prompt = await db.ClassifierPromptVersions.SingleAsync(
+                    item => item.Version == ClassifierPromptDefinition.Version);
+                db.ClassifierRuns.Add(new ClassifierRun
+                {
+                    Id = "web-completed-development",
+                    EvaluationCorpusId = corpus.Id,
+                    ClassifierPromptVersionId = prompt.Id,
+                    Stage = ClassifierRunStage.DevelopmentValidation,
+                    State = ClassifierRunState.Completed,
+                    CreatedAtUtc = DateTime.UtcNow,
+                    UpdatedAtUtc = DateTime.UtcNow,
+                    CompletedAtUtc = DateTime.UtcNow
+                });
+                await db.SaveChangesAsync();
+            }
+
+            await scope.ServiceProvider.GetRequiredService<ClassifierPromptService>().LockV1Async(corpus.Id);
         }
 
         var locked = await client.GetStringAsync("/Classifier");
         Assert.Contains("Locked", locked, StringComparison.Ordinal);
+        Assert.Contains("Pinned corpus:", locked, StringComparison.Ordinal);
         Assert.DoesNotMatch("name=\"Stage\" value=\"Holdout\"[^>]*disabled", locked);
         Assert.Empty(factory.Gmail.ListRequests);
         await using (var scope = factory.Services.CreateAsyncScope())

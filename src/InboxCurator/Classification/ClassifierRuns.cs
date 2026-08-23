@@ -24,15 +24,34 @@ public sealed class ClassifierRunService(
         CancellationToken cancellationToken)
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        var corpus = await db.EvaluationCorpora
-            .OrderByDescending(item => item.CreatedAtUtc)
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? throw new InvalidOperationException("Create an evaluation corpus before starting a run.");
         var prompt = await db.ClassifierPromptVersions
             .SingleAsync(item => item.Version == ClassifierPromptDefinition.Version, cancellationToken);
-        if (stage == ClassifierRunStage.Holdout && !prompt.IsLocked)
+        EvaluationCorpus? corpus;
+        if (stage == ClassifierRunStage.Holdout)
         {
-            throw new InvalidOperationException("The prompt must be locked before running holdout.");
+            if (!prompt.IsLocked || !prompt.LockedEvaluationCorpusId.HasValue)
+            {
+                throw new InvalidOperationException("The prompt must be locked to a completed development corpus before running holdout.");
+            }
+
+            corpus = await db.EvaluationCorpora.SingleOrDefaultAsync(
+                item => item.Id == prompt.LockedEvaluationCorpusId.Value,
+                cancellationToken);
+            if (corpus is null)
+            {
+                throw new InvalidOperationException("The prompt's locked evaluation corpus is unavailable.");
+            }
+        }
+        else
+        {
+            corpus = await db.EvaluationCorpora
+                .OrderByDescending(item => item.CreatedAtUtc)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (corpus is null)
+        {
+            throw new InvalidOperationException("Create an evaluation corpus before starting a run.");
         }
 
         var configured = options.Value.Profiles
@@ -151,12 +170,15 @@ public sealed class ClassifierRunExecutor(
         ClassifierModelProfile profile;
         ClassifierPromptSnapshot prompt;
         long[] itemIds;
+        bool freshProfile;
         await using (var db = await dbFactory.CreateDbContextAsync(cancellationToken))
         {
             var run = await db.ClassifierRuns
                 .Include(item => item.ClassifierPromptVersion)
                 .SingleAsync(item => item.Id == runId, cancellationToken);
             var storedProfile = await db.ClassifierRunProfiles.SingleAsync(item => item.Id == profileId, cancellationToken);
+            freshProfile = storedProfile.State == ClassifierProfileState.Pending &&
+                !await db.ClassifierResults.AnyAsync(item => item.ClassifierRunProfileId == profileId, cancellationToken);
             storedProfile.State = ClassifierProfileState.Running;
             storedProfile.StartedAtUtc ??= timeProvider.GetUtcNow().UtcDateTime;
             run.CurrentProfileKey = storedProfile.ProfileKey;
@@ -181,7 +203,14 @@ public sealed class ClassifierRunExecutor(
                 .ToArrayAsync(cancellationToken);
         }
 
-        var isFirstRequest = true;
+        if (freshProfile)
+        {
+            await EnsureColdStartAsync(profile, cancellationToken);
+        }
+
+        // The first newly executed request is a cold-start observation even after a
+        // process resume. Durable results skipped below do not consume this marker.
+        var needsColdObservation = true;
         try
         {
             foreach (var itemId in itemIds)
@@ -191,7 +220,6 @@ public sealed class ClassifierRunExecutor(
                 if (await db.ClassifierResults.AnyAsync(item =>
                     item.ClassifierRunProfileId == profileId && item.EvaluationCorpusItemId == itemId, cancellationToken))
                 {
-                    isFirstRequest = false;
                     continue;
                 }
 
@@ -204,7 +232,7 @@ public sealed class ClassifierRunExecutor(
 
                 run.CurrentSplit = item.Split;
                 run.UpdatedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
-                var result = await ClassifyItemAsync(runId, profileId, item, profile, prompt, isFirstRequest, cancellationToken);
+                var result = await ClassifyItemAsync(runId, profileId, item, profile, prompt, needsColdObservation, cancellationToken);
                 db.ClassifierResults.Add(result);
                 if (result.Status == ClassifierResultStatus.Completed)
                 {
@@ -218,12 +246,11 @@ public sealed class ClassifierRunExecutor(
                 // Once inference returned, preserve that completed observation even if cancellation
                 // arrived between the response and this durable item boundary.
                 await db.SaveChangesAsync(CancellationToken.None);
-                if (isFirstRequest && result.Status == ClassifierResultStatus.Completed)
+                if (needsColdObservation && result.Status == ClassifierResultStatus.Completed)
                 {
                     await CaptureResidencyAsync(profileId, profile.Model, result.LoadDurationNanoseconds, cancellationToken);
+                    needsColdObservation = false;
                 }
-
-                isFirstRequest = false;
             }
 
             await using var completionDb = await dbFactory.CreateDbContextAsync(cancellationToken);
@@ -248,6 +275,30 @@ public sealed class ClassifierRunExecutor(
                     throw new OllamaRequestException("model_unload_failed", exception);
                 }
             }
+        }
+    }
+
+    private async Task EnsureColdStartAsync(ClassifierModelProfile profile, CancellationToken cancellationToken)
+    {
+        var residency = await runtime.GetResidencyAsync(profile.Model, cancellationToken);
+        if (residency is null)
+        {
+            return;
+        }
+
+        using var unloadTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        unloadTimeout.CancelAfter(TimeSpan.FromSeconds(30));
+        try
+        {
+            await runtime.UnloadAsync(profile.Model, unloadTimeout.Token);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            throw new OllamaRequestException("model_unload_failed", exception);
         }
     }
 

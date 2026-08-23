@@ -21,7 +21,12 @@ public sealed class DatabaseMigrationTests
 
             var migrations = await db.Database.GetAppliedMigrationsAsync();
             Assert.Equal(
-                ["202608190001_InitialCreate", "202608190002_HumanSeedDecisions", "20260823120322_AddClassifierEvaluationLab"],
+                [
+                    "202608190001_InitialCreate",
+                    "202608190002_HumanSeedDecisions",
+                    "20260823120322_AddClassifierEvaluationLab",
+                    "20260823195011_PinPromptToEvaluationCorpus"
+                ],
                 migrations);
             db.ClusterDecisions.Add(new ClusterDecision
             {

@@ -72,6 +72,7 @@ erDiagram
         TEXT SystemPromptSha256
         TEXT OutputSchemaVersion
         INTEGER IsLocked
+        INTEGER LockedEvaluationCorpusId FK
     }
     ClassifierRuns {
         TEXT Id PK
@@ -102,6 +103,7 @@ erDiagram
     ClusterDecisions }o..o{ Messages : "matches exact GroupKey in query"
     EvaluationCorpora ||--|{ EvaluationCorpusItems : "freezes evidence"
     EvaluationCorpora ||--o{ ClassifierRuns : "benchmarked by"
+    EvaluationCorpora ||--o{ ClassifierPromptVersions : "pins locked holdout"
     ClassifierPromptVersions ||--o{ ClassifierRuns : "reproduces prompt"
     ClassifierRuns ||--|{ ClassifierRunProfiles : "snapshots settings"
     ClassifierRunProfiles ||--o{ ClassifierResults : "produces"
@@ -210,7 +212,7 @@ Only active `KeepProtect` and `UnwantedExistingAndFuture` decisions become binar
 
 ### `ClassifierPromptVersions`
 
-Stores immutable prompt text, SHA-256, output schema version, actual JSON Schema, creation time, and explicit holdout-lock state. Startup rejects changing prompt/schema text under the existing `MAIL-003A-PROMPT-V1` identifier.
+Stores immutable prompt text, SHA-256, output schema version, actual JSON Schema, creation time, and explicit holdout-lock state. `LockedEvaluationCorpusId` is nullable while developing, then is set when V1 is locked after a completed development/validation run. Every V1 holdout run uses that pinned corpus even if newer corpora exist. Startup rejects changing prompt/schema text under the existing `MAIL-003A-PROMPT-V1` identifier.
 
 ### `ClassifierRuns` and `ClassifierRunProfiles`
 
