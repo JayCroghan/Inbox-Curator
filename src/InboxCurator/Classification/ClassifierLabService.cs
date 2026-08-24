@@ -157,7 +157,7 @@ public sealed class ClassifierLabService(
             .Include(item => item.LockedEvaluationCorpus)
             .OrderByDescending(item => item.CreatedAtUtc)
             .ToArrayAsync(cancellationToken);
-        var prompt = promptEntities.Single(item => item.Version == ClassifierPromptV2Definition.Version);
+        var prompt = promptEntities.Single(item => item.Version == ClassifierPromptV3Definition.Version);
 
         IReadOnlySet<string>? installed = null;
         try

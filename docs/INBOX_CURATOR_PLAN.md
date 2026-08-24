@@ -2,8 +2,8 @@
 
 > **Status:** Active  
 > **Last updated:** 2026-08-24<br>
-> **Current phase:** `MAIL-003A.1 — Rich classifier explanations with self-repair normalization`<br>
-> **Current execution:** Preserve the V1 experiment, implement the V2 judgment/normalization protocol, and leave holdout untouched; no real V2 bakeoff runs during development.<br>
+> **Current phase:** `MAIL-003A.2 — V3 classification policy refinement`<br>
+> **Current execution:** Preserve V1/V2, reuse the proven V2 response protocol, refine decision semantics in V3, and leave holdout untouched; no real V3 inference during development.<br>
 > **Source of truth:** This file should be updated as design decisions or phase status change.
 
 ---
@@ -894,7 +894,7 @@ Gmail remains exactly `gmail.readonly`; the lab uses SQLite plus local Ollama on
 
 ## MAIL-003A.1 — Rich Explanations and Self-Repair Normalization
 
-**Status: CURRENT**
+**Status: COMPLETE**
 
 The V1 development/validation run established useful explanation content but was dominated by strict-schema failures—principally `schema_invalid_reason_codes`. Duplicate, excessive, or imperfect diagnostic codes caused otherwise usable judgments to be discarded. The run therefore measured exact serialization compliance more heavily than mailbox judgment. It also exposed a cold-load accounting bug: a roughly four-minute Qwen HDD load appeared as zero when its first primary response later failed validation.
 
@@ -909,6 +909,20 @@ V2 preserves V1 and all historical runs unchanged, reuses an explicitly selected
 Primary and repair timing/token metrics are persisted separately. The first returned primary response supplies the cold-load observation even if direct normalization and repair ultimately fail. V1 and V2 remain visibly distinct in the scoreboard. Read-only inspection views expose disagreements/failures, all self-repaired results, semantic warnings, normalization warnings, or all evaluated results without changing human decisions.
 
 Development/validation is the only executable stage in MAIL-003A.1. Corpus selection is explicit, holdout items are neither exposed nor executed, and unknown sources remain untouched.
+
+---
+
+## MAIL-003A.2 — V3 Classification Policy Refinement
+
+**Status: CURRENT**
+
+The V2 Development + Validation run completed successfully against the frozen corpus: all five configured profiles produced 32/32 canonical results, 100% were normalized directly, no repair calls were needed, and there were no normalization failures. The V2 judgment/normalization protocol is therefore retained unchanged.
+
+Review of those canonical results identified a semantic policy problem instead: models used `NEEDS_REVIEW` too broadly even when their explanations recognized strong personal/professional relationship evidence or clear recurring newsletter noise. `MAIL-003A-PROMPT-V3` is an immutable prompt-only policy refinement. It makes sustained direct and professional correspondence presumptive KEEP, treats clear recurring promotional/newsletter traffic without protected evidence as UNWANTED, and reserves NEEDS_REVIEW for genuinely mixed, ambiguous, sparse, or contradictory evidence.
+
+V3 reuses `MAIL-003A-OUTPUT-V2`, `NormalizeRepairV2`, and `MAIL-003A-REPAIR-V1` exactly. Classifier input now derives unread, starred, important, and relationship percentages from counts already frozen in each corpus item, using the same deterministic one-decimal calculation and zero-message safety as existing percentages. This does not mutate the frozen corpus or query Gmail.
+
+Development/validation remains the only executable stage. The locked holdout remains unexposed and unexecuted, unknown sources remain untouched, and no real V3 inference is run during implementation.
 
 ---
 
