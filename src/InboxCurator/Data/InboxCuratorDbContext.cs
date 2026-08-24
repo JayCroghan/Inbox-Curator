@@ -109,6 +109,12 @@ public sealed class InboxCuratorDbContext(DbContextOptions<InboxCuratorDbContext
         prompts.Property(prompt => prompt.Version).HasMaxLength(64);
         prompts.Property(prompt => prompt.SystemPromptSha256).HasMaxLength(64);
         prompts.Property(prompt => prompt.OutputSchemaVersion).HasMaxLength(64);
+        prompts.Property(prompt => prompt.OutputJsonSchemaSha256).HasMaxLength(64);
+        prompts.Property(prompt => prompt.ResponseProtocol).HasConversion<string>().HasMaxLength(32);
+        prompts.Property(prompt => prompt.RepairPromptVersion).HasMaxLength(64);
+        prompts.Property(prompt => prompt.RepairSystemPromptSha256).HasMaxLength(64);
+        prompts.Property(prompt => prompt.RepairOutputSchemaVersion).HasMaxLength(64);
+        prompts.Property(prompt => prompt.RepairOutputJsonSchemaSha256).HasMaxLength(64);
         prompts.HasIndex(prompt => prompt.LockedEvaluationCorpusId);
         prompts.HasOne(prompt => prompt.LockedEvaluationCorpus)
             .WithMany(corpus => corpus.LockedPromptVersions)
@@ -160,6 +166,8 @@ public sealed class InboxCuratorDbContext(DbContextOptions<InboxCuratorDbContext
         results.Property(result => result.Confidence).HasConversion<string>().HasMaxLength(16);
         results.Property(result => result.Category).HasConversion<string>().HasMaxLength(32);
         results.Property(result => result.Rationale).HasMaxLength(240);
+        results.Property(result => result.NormalizationMode).HasConversion<string>().HasMaxLength(24);
+        results.Property(result => result.RepairFailureCode).HasMaxLength(64);
         results.Property(result => result.FailureCode).HasMaxLength(64);
         results.HasOne(result => result.ClassifierRun)
             .WithMany(run => run.Results)

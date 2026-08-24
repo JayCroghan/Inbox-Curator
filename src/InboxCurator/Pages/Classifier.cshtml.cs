@@ -26,11 +26,17 @@ public sealed class ClassifierModel(
     [BindProperty(SupportsGet = true)]
     public int ErrorPage { get; set; } = 1;
 
-    [BindProperty]
-    public ClassifierRunStage Stage { get; set; }
+    [BindProperty(SupportsGet = true)]
+    public ClassifierInspectionMode InspectionMode { get; set; } = ClassifierInspectionMode.Disagreements;
 
     [BindProperty]
     public List<string> SelectedProfiles { get; set; } = [];
+
+    [BindProperty]
+    public long CorpusId { get; set; }
+
+    [BindProperty]
+    public string PromptVersion { get; set; } = ClassifierPromptV2Definition.Version;
 
     public ClassifierLabSnapshot Snapshot { get; private set; } = null!;
 
@@ -38,7 +44,23 @@ public sealed class ClassifierModel(
     public string? Notice { get; set; }
 
     public async Task OnGetAsync(CancellationToken cancellationToken) =>
-        Snapshot = await lab.GetAsync(RunId, ProfileId, ScoreSort, Direction, ErrorPage, cancellationToken);
+        Snapshot = await lab.GetAsync(
+            RunId,
+            ProfileId,
+            ScoreSort,
+            Direction,
+            InspectionMode,
+            ErrorPage,
+            cancellationToken);
+
+    public static string InspectionLabel(ClassifierInspectionMode mode) => mode switch
+    {
+        ClassifierInspectionMode.SelfRepaired => "Self-repaired results",
+        ClassifierInspectionMode.SemanticWarnings => "Semantic warnings",
+        ClassifierInspectionMode.NormalizationWarnings => "Normalization warnings",
+        ClassifierInspectionMode.All => "All evaluated results",
+        _ => "Disagreements & failures"
+    };
 
     public async Task<IActionResult> OnPostCreateCorpusAsync(CancellationToken cancellationToken)
     {
@@ -47,12 +69,15 @@ public sealed class ClassifierModel(
         return RedirectToPage();
     }
 
-    public async Task<IActionResult> OnPostLockPromptAsync(long corpusId, CancellationToken cancellationToken)
+    public async Task<IActionResult> OnPostLockPromptAsync(
+        long corpusId,
+        string promptVersion,
+        CancellationToken cancellationToken)
     {
         try
         {
-            await prompts.LockV1Async(corpusId, cancellationToken);
-            Notice = $"{ClassifierPromptDefinition.Version} is locked to corpus {corpusId}. Holdout execution is now available.";
+            await prompts.LockAsync(promptVersion, corpusId, cancellationToken);
+            Notice = $"{promptVersion} is locked to corpus {corpusId}. Holdout remains disabled in MAIL-003A.1.";
         }
         catch (InvalidOperationException exception)
         {
@@ -66,10 +91,13 @@ public sealed class ClassifierModel(
     {
         try
         {
-            var runId = await runs.CreateAsync(Stage, SelectedProfiles, cancellationToken);
-            Notice = Stage == ClassifierRunStage.Holdout
-                ? "Locked holdout run queued."
-                : "Development + validation run queued.";
+            var runId = await runs.CreateAsync(
+                ClassifierRunStage.DevelopmentValidation,
+                SelectedProfiles,
+                CorpusId,
+                PromptVersion,
+                cancellationToken);
+            Notice = $"Development + validation run queued with {PromptVersion}.";
             return RedirectToPage(new { runId });
         }
         catch (InvalidOperationException exception)

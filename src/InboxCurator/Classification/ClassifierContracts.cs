@@ -29,7 +29,13 @@ public sealed record ClassifierPromptSnapshot(
     string SystemPrompt,
     string SystemPromptSha256,
     string OutputSchemaVersion,
-    string OutputJsonSchema);
+    string OutputJsonSchema,
+    ClassifierResponseProtocol ResponseProtocol = ClassifierResponseProtocol.StrictV1,
+    string? RepairPromptVersion = null,
+    string? RepairSystemPrompt = null,
+    string? RepairSystemPromptSha256 = null,
+    string? RepairOutputSchemaVersion = null,
+    string? RepairOutputJsonSchema = null);
 
 public sealed record ClassifierModelProfile(
     string Key,
@@ -58,8 +64,18 @@ public sealed record ClassifierResponseMetrics(
     int ThinkingCharacterCount);
 
 public sealed record ClusterClassifierResponse(
-    ValidatedClassifierOutput Output,
-    ClassifierResponseMetrics Metrics);
+    ValidatedClassifierOutput? Output,
+    string PrimaryResponse,
+    string? RepairResponse,
+    string? PrimaryExplanation,
+    IReadOnlyList<string> RawReasonCodes,
+    ClassifierNormalizationMode NormalizationMode,
+    IReadOnlyList<string> NormalizationWarnings,
+    IReadOnlyList<string> SemanticWarnings,
+    string? NormalizationFailureCode,
+    string? RepairFailureCode,
+    ClassifierResponseMetrics PrimaryMetrics,
+    ClassifierResponseMetrics? RepairMetrics);
 
 public interface IClusterClassifier
 {

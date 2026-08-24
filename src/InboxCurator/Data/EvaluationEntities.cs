@@ -45,6 +45,19 @@ public enum ClassifierResultStatus
     RequestFailure
 }
 
+public enum ClassifierResponseProtocol
+{
+    StrictV1,
+    NormalizeRepairV2
+}
+
+public enum ClassifierNormalizationMode
+{
+    Direct,
+    SelfRepaired,
+    Failed
+}
+
 public enum ClassifierRecommendation
 {
     Keep,
@@ -148,6 +161,14 @@ public sealed class ClassifierPromptVersion
     public required string SystemPromptSha256 { get; set; }
     public required string OutputSchemaVersion { get; set; }
     public required string OutputJsonSchema { get; set; }
+    public string? OutputJsonSchemaSha256 { get; set; }
+    public ClassifierResponseProtocol ResponseProtocol { get; set; }
+    public string? RepairPromptVersion { get; set; }
+    public string? RepairSystemPrompt { get; set; }
+    public string? RepairSystemPromptSha256 { get; set; }
+    public string? RepairOutputSchemaVersion { get; set; }
+    public string? RepairOutputJsonSchema { get; set; }
+    public string? RepairOutputJsonSchemaSha256 { get; set; }
     public bool IsLocked { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? LockedAtUtc { get; set; }
@@ -219,6 +240,14 @@ public sealed class ClassifierResult
     public ClassifierCategory? Category { get; set; }
     public string? ReasonCodesJson { get; set; }
     public string? Rationale { get; set; }
+    public string? PrimaryResponse { get; set; }
+    public string? RepairResponse { get; set; }
+    public string? PrimaryExplanation { get; set; }
+    public string? RawReasonCodesJson { get; set; }
+    public ClassifierNormalizationMode? NormalizationMode { get; set; }
+    public string? NormalizationWarningsJson { get; set; }
+    public string? SemanticWarningsJson { get; set; }
+    public string? RepairFailureCode { get; set; }
     public string? FailureCode { get; set; }
     public bool ThinkingPresent { get; set; }
     public int ThinkingCharacterCount { get; set; }
@@ -229,6 +258,12 @@ public sealed class ClassifierResult
     public long? PromptEvalDurationNanoseconds { get; set; }
     public int? EvalCount { get; set; }
     public long? EvalDurationNanoseconds { get; set; }
+    public long? RepairTotalDurationNanoseconds { get; set; }
+    public long? RepairLoadDurationNanoseconds { get; set; }
+    public int? RepairPromptEvalCount { get; set; }
+    public long? RepairPromptEvalDurationNanoseconds { get; set; }
+    public int? RepairEvalCount { get; set; }
+    public long? RepairEvalDurationNanoseconds { get; set; }
     public DateTime StartedAtUtc { get; set; }
     public DateTime CompletedAtUtc { get; set; }
 }

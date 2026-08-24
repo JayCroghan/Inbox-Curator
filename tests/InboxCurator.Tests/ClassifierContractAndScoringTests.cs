@@ -171,6 +171,68 @@ public sealed class ClassifierContractAndScoringTests
             expectedItemCount: 2));
     }
 
+    [Fact]
+    public void V2Scoring_ReportsCanonicalNormalizationWarningsAndRepairOverhead()
+    {
+        var run = new ClassifierRun
+        {
+            Id = "v2-score",
+            Stage = ClassifierRunStage.DevelopmentValidation,
+            State = ClassifierRunState.Completed,
+            CreatedAtUtc = DateTime.UtcNow,
+            UpdatedAtUtc = DateTime.UtcNow,
+            ClassifierPromptVersion = new ClassifierPromptVersion
+            {
+                Version = ClassifierPromptV2Definition.Version,
+                SystemPrompt = ClassifierPromptV2Definition.SystemPrompt,
+                SystemPromptSha256 = ClassifierPromptV2Definition.SystemPromptSha256,
+                OutputSchemaVersion = ClassifierPromptV2Definition.OutputSchemaVersion,
+                OutputJsonSchema = ClassifierPromptV2Definition.OutputJsonSchema,
+                ResponseProtocol = ClassifierResponseProtocol.NormalizeRepairV2,
+                CreatedAtUtc = DateTime.UtcNow
+            }
+        };
+        var profile = new ClassifierRunProfile
+        {
+            ClassifierRunId = run.Id,
+            ProfileKey = "v2-profile",
+            ModelName = "model",
+            KeepAlive = "30m",
+            State = ClassifierProfileState.Completed
+        };
+        var items = new[]
+        {
+            new EvaluationScoredItem(
+                EvaluationGroundTruth.Keep, ClassifierResultStatus.Completed,
+                ClassifierRecommendation.Keep, ClassifierConfidence.High,
+                true, 10_000_000_000, 600, 80, 2_000_000_000,
+                ClassifierNormalizationMode.Direct, 1, null),
+            new EvaluationScoredItem(
+                EvaluationGroundTruth.Unwanted, ClassifierResultStatus.Completed,
+                ClassifierRecommendation.Unwanted, ClassifierConfidence.High,
+                false, 3_000_000_000, 600, 80, 2_000_000_000,
+                ClassifierNormalizationMode.SelfRepaired, 1, 1_000_000_000),
+            new EvaluationScoredItem(
+                EvaluationGroundTruth.Keep, ClassifierResultStatus.SchemaFailure,
+                null, null, false, 4_000_000_000, 600, 80, 2_000_000_000,
+                ClassifierNormalizationMode.Failed, 0, 3_000_000_000)
+        };
+
+        var score = EvaluationScoreCalculator.Calculate(run, profile, items, expectedItemCount: 3);
+
+        Assert.Equal(ClassifierPromptV2Definition.Version, score.PromptVersion);
+        Assert.Equal(ClassifierResponseProtocol.NormalizeRepairV2, score.ResponseProtocol);
+        Assert.Equal(2, score.ValidCanonicalResultCount);
+        Assert.Equal(1, score.DirectNormalizationCount);
+        Assert.Equal(100d / 3, score.DirectNormalizationPercentage, 5);
+        Assert.Equal(1, score.SelfRepairedCount);
+        Assert.Equal(1, score.UnresolvedNormalizationFailureCount);
+        Assert.Equal(2, score.SemanticWarningCount);
+        Assert.Equal(3_500, score.MedianSteadyStateDurationMilliseconds);
+        Assert.Equal(2_000, score.MedianRepairDurationMilliseconds);
+        Assert.Equal(4, score.TotalRepairOverheadSeconds);
+    }
+
     private static SafetyGateStatus Gate(
         ClassifierRunState runState,
         ClassifierProfileState profileState,

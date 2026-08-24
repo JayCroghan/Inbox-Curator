@@ -1,6 +1,6 @@
 # Database schema
 
-EF Core migration `202608190001_InitialCreate` creates the census tables. Migration `202608190002_HumanSeedDecisions` adds durable current decisions and append-only decision history. Migration `20260823120322_AddClassifierEvaluationLab` adds frozen corpora, immutable prompt versions, durable background runs, model-profile snapshots, and per-item results. SQLite stores UTC `DateTime` values as `TEXT`, booleans as `INTEGER`, and enum values as readable strings.
+EF Core migration `202608190001_InitialCreate` creates the census tables. Migration `202608190002_HumanSeedDecisions` adds durable current decisions and append-only decision history. Migration `20260823120322_AddClassifierEvaluationLab` adds frozen corpora, immutable prompt versions, durable background runs, model-profile snapshots, and per-item results. Migration `20260823213406_AddClassifierResponseNormalizationV2` adds the V2 response protocol, repair metrics, and reproducibility hashes without rewriting V1 rows. SQLite stores UTC `DateTime` values as `TEXT`, booleans as `INTEGER`, and enum values as readable strings.
 
 ```mermaid
 erDiagram
@@ -71,6 +71,12 @@ erDiagram
         TEXT Version UK
         TEXT SystemPromptSha256
         TEXT OutputSchemaVersion
+        TEXT OutputJsonSchemaSha256
+        TEXT ResponseProtocol
+        TEXT RepairPromptVersion
+        TEXT RepairSystemPromptSha256
+        TEXT RepairOutputSchemaVersion
+        TEXT RepairOutputJsonSchemaSha256
         INTEGER IsLocked
         INTEGER LockedEvaluationCorpusId FK
     }
@@ -96,6 +102,12 @@ erDiagram
         TEXT Status
         TEXT Recommendation
         TEXT Confidence
+        TEXT PrimaryResponse
+        TEXT RepairResponse
+        TEXT PrimaryExplanation
+        TEXT NormalizationMode
+        TEXT NormalizationWarningsJson
+        TEXT SemanticWarningsJson
     }
 
     SentInteractions }o..o{ Messages : "matches address or thread in query"
@@ -212,7 +224,7 @@ Only active `KeepProtect` and `UnwantedExistingAndFuture` decisions become binar
 
 ### `ClassifierPromptVersions`
 
-Stores immutable prompt text, SHA-256, output schema version, actual JSON Schema, creation time, and explicit holdout-lock state. `LockedEvaluationCorpusId` is nullable while developing, then is set when V1 is locked after a completed development/validation run. Every V1 holdout run uses that pinned corpus even if newer corpora exist. Startup rejects changing prompt/schema text under the existing `MAIL-003A-PROMPT-V1` identifier.
+Stores immutable primary prompt text, SHA-256, output schema version, actual JSON Schema, response protocol, creation time, and explicit holdout-lock state. V2 rows additionally persist the repair prompt/schema versions, text, and hashes. `LockedEvaluationCorpusId` is nullable while developing and is set only after a completed development/validation run for that prompt/corpus pair. Startup rejects changing either V1 or V2 text/schema under an existing version identifier.
 
 ### `ClassifierRuns` and `ClassifierRunProfiles`
 
@@ -220,7 +232,7 @@ Stores immutable prompt text, SHA-256, output schema version, actual JSON Schema
 
 ### `ClassifierResults`
 
-The unique `(ClassifierRunProfileId, EvaluationCorpusItemId)` pair is the resume/idempotency boundary. Each row stores completion/schema/request status; validated recommendation, confidence, category, reason codes, and short rationale; sanitized failure code; whether thinking was present and its character count (never the thinking text); cold-request flag; and Ollama duration/token counters. Results cannot alter `ClusterDecisions`.
+The unique `(ClassifierRunProfileId, EvaluationCorpusItemId)` pair is the resume/idempotency boundary. Each row stores completion/schema/request status; canonical recommendation, confidence, category, and reason codes; the complete primary and repair final responses plus user-visible primary explanation; raw reason values; normalization mode and warnings; semantic warnings; repair failure code; primary and repair duration/token counters; whether thinking was present and its character count (never the thinking text); and the cold-primary flag. Repair contributes only the recommendation; every other canonical field remains derived from primary normalization. V1 rationale remains readable. Results cannot alter `ClusterDecisions`.
 
 ## Deliberately absent
 

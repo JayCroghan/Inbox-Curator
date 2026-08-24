@@ -113,11 +113,16 @@ public sealed class ClassifierRunTests
             }),
             queue,
             TimeProvider.System);
+        long corpusId;
+        await using (var lookup = await store.Factory.CreateDbContextAsync())
+        {
+            corpusId = await lookup.EvaluationCorpora.Select(item => item.Id).SingleAsync();
+        }
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(
-            ClassifierRunStage.Holdout, ["profile-a"], CancellationToken.None));
+            ClassifierRunStage.Holdout, ["profile-a"], corpusId, ClassifierPromptDefinition.Version, CancellationToken.None));
         var created = await service.CreateAsync(
-            ClassifierRunStage.DevelopmentValidation, ["profile-a"], CancellationToken.None);
+            ClassifierRunStage.DevelopmentValidation, ["profile-a"], corpusId, ClassifierPromptDefinition.Version, CancellationToken.None);
         Assert.True(queue.WakeCount > 0);
 
         await service.CancelAsync(created, CancellationToken.None);
@@ -160,14 +165,87 @@ public sealed class ClassifierRunTests
     }
 
     [Fact]
-    public async Task PromptLock_RequiresCompletedDevelopmentRunAndPinsHoldoutToThatCorpus()
+    public async Task Executor_PersistsSeparateRepairMetricsAndCapturesColdLoadFromNormalizationFailure()
+    {
+        await using var store = new SqliteTestStore();
+        await store.InitializeAsync();
+        var runId = await SeedRunAsync(store, lockedPrompt: false);
+        var events = new List<string>();
+        var classifier = new RecordingClassifier(events)
+        {
+            NormalizationFailKey = "profile-a:list-0.example",
+            SelfRepairKey = "profile-a:sender-1@example.test"
+        };
+        var executor = new ClassifierRunExecutor(
+            store.Factory,
+            classifier,
+            new RecordingRuntime(events, new HashSet<string> { "model-a", "model-b" }),
+            TimeProvider.System,
+            NullLogger<ClassifierRunExecutor>.Instance);
+
+        await executor.ExecuteAsync(runId, CancellationToken.None);
+
+        await using var db = await store.Factory.CreateDbContextAsync();
+        var profile = await db.ClassifierRunProfiles.SingleAsync(item => item.ClassifierRunId == runId && item.ProfileKey == "profile-a");
+        Assert.Equal(240_000_000_000, profile.ColdLoadDurationNanoseconds);
+        var results = await db.ClassifierResults
+            .Where(item => item.ClassifierRunProfileId == profile.Id)
+            .OrderBy(item => item.EvaluationCorpusItemId)
+            .ToArrayAsync();
+        Assert.Equal(ClassifierResultStatus.SchemaFailure, results[0].Status);
+        Assert.Equal(ClassifierNormalizationMode.Failed, results[0].NormalizationMode);
+        Assert.Equal("unusable primary response", results[0].PrimaryResponse);
+        Assert.Equal("still unusable repair response", results[0].RepairResponse);
+        Assert.True(results[0].IsColdLoadRequest);
+        Assert.Equal(1_500_000_000, results[0].RepairTotalDurationNanoseconds);
+        Assert.Equal(ClassifierResultStatus.Completed, results[1].Status);
+        Assert.Equal(ClassifierNormalizationMode.SelfRepaired, results[1].NormalizationMode);
+        Assert.Equal("{\"recommendation\":\"keep\"}", results[1].RepairResponse);
+        Assert.False(results[1].IsColdLoadRequest);
+        Assert.Equal(2_500_000_000, results[1].RepairTotalDurationNanoseconds);
+    }
+
+    [Fact]
+    public async Task Executor_RefusesPersistedHoldoutWithoutCallingClassifierOrRuntime()
+    {
+        await using var store = new SqliteTestStore();
+        await store.InitializeAsync();
+        var runId = await SeedRunAsync(store, lockedPrompt: true);
+        await using (var db = await store.Factory.CreateDbContextAsync())
+        {
+            var run = await db.ClassifierRuns.SingleAsync(item => item.Id == runId);
+            run.Stage = ClassifierRunStage.Holdout;
+            await db.SaveChangesAsync();
+        }
+
+        var events = new List<string>();
+        var executor = new ClassifierRunExecutor(
+            store.Factory,
+            new RecordingClassifier(events),
+            new RecordingRuntime(events, new HashSet<string> { "model-a", "model-b" }),
+            TimeProvider.System,
+            NullLogger<ClassifierRunExecutor>.Instance);
+
+        await executor.ExecuteAsync(runId, CancellationToken.None);
+
+        Assert.Empty(events);
+        await using var verification = await store.Factory.CreateDbContextAsync();
+        var failed = await verification.ClassifierRuns.SingleAsync(item => item.Id == runId);
+        Assert.Equal(ClassifierRunState.Failed, failed.State);
+        Assert.Equal("holdout_disabled", failed.FailureCode);
+        Assert.Empty(await verification.ClassifierResults.Where(item => item.ClassifierRunId == runId).ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task PromptLock_RequiresCompletedDevelopmentRunAndV2CanReuseExplicitCorpusWhileHoldoutStaysDisabled()
     {
         await using var store = new SqliteTestStore();
         await store.InitializeAsync();
         var promptService = new ClassifierPromptService(store.Factory, TimeProvider.System);
-        var prompt = await promptService.EnsureV1Async();
+        await promptService.EnsureAllAsync();
+        await using var promptLookup = await store.Factory.CreateDbContextAsync();
+        var prompt = await promptLookup.ClassifierPromptVersions.SingleAsync(item => item.Version == ClassifierPromptDefinition.Version);
         long corpusAId;
-        long corpusAHoldoutItemId;
         await using (var db = await store.Factory.CreateDbContextAsync())
         {
             var corpusA = Corpus("corpus-a", DateTime.UtcNow.AddMinutes(-5));
@@ -180,7 +258,6 @@ public sealed class ClassifierRunTests
             db.EvaluationCorpora.Add(corpusA);
             await db.SaveChangesAsync();
             corpusAId = corpusA.Id;
-            corpusAHoldoutItemId = holdoutItem.Id;
         }
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => promptService.LockV1Async(corpusAId));
@@ -228,29 +305,26 @@ public sealed class ClassifierRunTests
             }),
             queue,
             TimeProvider.System);
-        var holdoutRunId = await runService.CreateAsync(
+        await Assert.ThrowsAsync<InvalidOperationException>(() => runService.CreateAsync(
             ClassifierRunStage.Holdout,
             ["profile-a"],
+            corpusAId,
+            ClassifierPromptV2Definition.Version,
+            CancellationToken.None));
+        var v2RunId = await runService.CreateAsync(
+            ClassifierRunStage.DevelopmentValidation,
+            ["profile-a"],
+            corpusAId,
+            ClassifierPromptV2Definition.Version,
             CancellationToken.None);
 
-        var events = new List<string>();
-        var executor = new ClassifierRunExecutor(
-            store.Factory,
-            new RecordingClassifier(events),
-            new RecordingRuntime(events, new HashSet<string> { "model-a" }),
-            TimeProvider.System,
-            NullLogger<ClassifierRunExecutor>.Instance);
-        await executor.ExecuteAsync(holdoutRunId, CancellationToken.None);
-
         await using var verification = await store.Factory.CreateDbContextAsync();
-        var holdoutRun = await verification.ClassifierRuns.SingleAsync(item => item.Id == holdoutRunId);
-        Assert.Equal(corpusAId, holdoutRun.EvaluationCorpusId);
-        Assert.Equal(1, holdoutRun.TotalItems);
-        var result = await verification.ClassifierResults
-            .Include(item => item.EvaluationCorpusItem)
-            .SingleAsync(item => item.ClassifierRunId == holdoutRunId);
-        Assert.Equal(corpusAHoldoutItemId, result.EvaluationCorpusItemId);
-        Assert.Equal(corpusAId, result.EvaluationCorpusItem.EvaluationCorpusId);
+        var v2Run = await verification.ClassifierRuns
+            .Include(item => item.ClassifierPromptVersion)
+            .SingleAsync(item => item.Id == v2RunId);
+        Assert.Equal(corpusAId, v2Run.EvaluationCorpusId);
+        Assert.Equal(ClassifierPromptV2Definition.Version, v2Run.ClassifierPromptVersion.Version);
+        Assert.Equal(1, v2Run.TotalItems);
     }
 
     private static async Task<string> SeedRunAsync(SqliteTestStore store, bool lockedPrompt, bool includeRun = true)
@@ -338,6 +412,8 @@ public sealed class ClassifierRunTests
     private sealed class RecordingClassifier(List<string> events) : IClusterClassifier
     {
         public string? FailKey { get; init; }
+        public string? NormalizationFailKey { get; init; }
+        public string? SelfRepairKey { get; init; }
 
         public Task<ClusterClassifierResponse> ClassifyAsync(
             ClassifierModelProfile profile,
@@ -352,6 +428,45 @@ public sealed class ClassifierRunTests
                 throw new InvalidOperationException("Synthetic item failure.");
             }
 
+            if (key == NormalizationFailKey)
+            {
+                return Task.FromResult(new ClusterClassifierResponse(
+                    null,
+                    "unusable primary response",
+                    "still unusable repair response",
+                    null,
+                    ["unknown_reason"],
+                    ClassifierNormalizationMode.Failed,
+                    ["invalid_json"],
+                    [],
+                    "normalization_failed",
+                    "repair_invalid_json",
+                    new ClassifierResponseMetrics(242_000_000_000, 240_000_000_000, 600, 700_000_000, 80, 1_000_000_000, true, 999),
+                    new ClassifierResponseMetrics(1_500_000_000, 1_000_000, 120, 200_000_000, 20, 500_000_000, false, 0)));
+            }
+
+            if (key == SelfRepairKey)
+            {
+                return Task.FromResult(new ClusterClassifierResponse(
+                    new ValidatedClassifierOutput(
+                        ClassifierRecommendation.Keep,
+                        ClassifierConfidence.Low,
+                        ClassifierCategory.Professional,
+                        [ClassifierReasonCode.ProfessionalContent],
+                        "The original explanation remains visible."),
+                    "{\"recommendation\":\"retain\",\"explanation\":\"The original explanation remains visible.\"}",
+                    "{\"recommendation\":\"keep\"}",
+                    "The original explanation remains visible.",
+                    ["professional_content"],
+                    ClassifierNormalizationMode.SelfRepaired,
+                    ["recommendation_unrecognized"],
+                    [],
+                    null,
+                    null,
+                    new ClassifierResponseMetrics(4_000_000_000, 1_000_000, 600, 700_000_000, 80, 1_000_000_000, false, 0),
+                    new ClassifierResponseMetrics(2_500_000_000, 1_000_000, 150, 200_000_000, 25, 600_000_000, false, 0)));
+            }
+
             return Task.FromResult(new ClusterClassifierResponse(
                 new ValidatedClassifierOutput(
                     ClassifierRecommendation.Keep,
@@ -359,7 +474,17 @@ public sealed class ClassifierRunTests
                     ClassifierCategory.Professional,
                     [ClassifierReasonCode.ProfessionalContent],
                     "Synthetic valid result."),
-                new ClassifierResponseMetrics(2_000_000_000, 1_000_000_000, 600, 700_000_000, 80, 1_000_000_000, false, 0)));
+                "{\"recommendation\":\"keep\"}",
+                null,
+                "Synthetic valid result.",
+                ["professional_content"],
+                ClassifierNormalizationMode.Direct,
+                [],
+                [],
+                null,
+                null,
+                new ClassifierResponseMetrics(2_000_000_000, 1_000_000_000, 600, 700_000_000, 80, 1_000_000_000, false, 0),
+                null));
         }
     }
 

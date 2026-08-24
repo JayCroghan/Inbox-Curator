@@ -21,38 +21,22 @@ public sealed class ClassifierRunService(
     public async Task<string> CreateAsync(
         ClassifierRunStage stage,
         IReadOnlyCollection<string> selectedProfileKeys,
+        long evaluationCorpusId,
+        string promptVersion,
         CancellationToken cancellationToken)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        var prompt = await db.ClassifierPromptVersions
-            .SingleAsync(item => item.Version == ClassifierPromptDefinition.Version, cancellationToken);
-        EvaluationCorpus? corpus;
         if (stage == ClassifierRunStage.Holdout)
         {
-            if (!prompt.IsLocked || !prompt.LockedEvaluationCorpusId.HasValue)
-            {
-                throw new InvalidOperationException("The prompt must be locked to a completed development corpus before running holdout.");
-            }
-
-            corpus = await db.EvaluationCorpora.SingleOrDefaultAsync(
-                item => item.Id == prompt.LockedEvaluationCorpusId.Value,
-                cancellationToken);
-            if (corpus is null)
-            {
-                throw new InvalidOperationException("The prompt's locked evaluation corpus is unavailable.");
-            }
-        }
-        else
-        {
-            corpus = await db.EvaluationCorpora
-                .OrderByDescending(item => item.CreatedAtUtc)
-                .FirstOrDefaultAsync(cancellationToken);
+            throw new InvalidOperationException("Holdout execution remains disabled in MAIL-003A.1.");
         }
 
-        if (corpus is null)
-        {
-            throw new InvalidOperationException("Create an evaluation corpus before starting a run.");
-        }
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var prompt = await db.ClassifierPromptVersions
+            .SingleOrDefaultAsync(item => item.Version == promptVersion, cancellationToken)
+            ?? throw new InvalidOperationException("The selected classifier prompt version does not exist.");
+        var corpus = await db.EvaluationCorpora
+            .SingleOrDefaultAsync(item => item.Id == evaluationCorpusId, cancellationToken)
+            ?? throw new InvalidOperationException("The selected frozen corpus does not exist.");
 
         var configured = options.Value.Profiles
             .Select((profile, index) => new { Profile = profile, Index = index })
@@ -136,6 +120,12 @@ public sealed class ClassifierRunExecutor(
     {
         try
         {
+            if (await IsHoldoutRunAsync(runId, cancellationToken))
+            {
+                await FailRunAsync(runId, "holdout_disabled");
+                return;
+            }
+
             var installedModels = await runtime.GetInstalledModelsAsync(cancellationToken);
             await MarkRunStartedAsync(runId, cancellationToken);
             var profiles = await LoadProfilesAsync(runId, cancellationToken);
@@ -191,7 +181,13 @@ public sealed class ClassifierRunExecutor(
                 run.ClassifierPromptVersion.SystemPrompt,
                 run.ClassifierPromptVersion.SystemPromptSha256,
                 run.ClassifierPromptVersion.OutputSchemaVersion,
-                run.ClassifierPromptVersion.OutputJsonSchema);
+                run.ClassifierPromptVersion.OutputJsonSchema,
+                run.ClassifierPromptVersion.ResponseProtocol,
+                run.ClassifierPromptVersion.RepairPromptVersion,
+                run.ClassifierPromptVersion.RepairSystemPrompt,
+                run.ClassifierPromptVersion.RepairSystemPromptSha256,
+                run.ClassifierPromptVersion.RepairOutputSchemaVersion,
+                run.ClassifierPromptVersion.RepairOutputJsonSchema);
             var itemQuery = db.EvaluationCorpusItems.Where(item => item.EvaluationCorpusId == run.EvaluationCorpusId);
             itemQuery = run.Stage == ClassifierRunStage.Holdout
                 ? itemQuery.Where(item => item.Split == EvaluationSplit.Holdout)
@@ -243,10 +239,19 @@ public sealed class ClassifierRunExecutor(
                     run.FailedItems++;
                 }
 
+                if (needsColdObservation && result.PrimaryResponse is not null)
+                {
+                    var coldProfile = await db.ClassifierRunProfiles.SingleAsync(
+                        entry => entry.Id == profileId,
+                        CancellationToken.None);
+                    coldProfile.ColdLoadDurationNanoseconds ??= result.LoadDurationNanoseconds;
+                }
+
                 // Once inference returned, preserve that completed observation even if cancellation
-                // arrived between the response and this durable item boundary.
+                // arrived between the response and this durable item boundary. Cold-load duration
+                // is committed with that same boundary before the separate residency probe.
                 await db.SaveChangesAsync(CancellationToken.None);
-                if (needsColdObservation && result.Status == ClassifierResultStatus.Completed)
+                if (needsColdObservation && result.PrimaryResponse is not null)
                 {
                     await CaptureResidencyAsync(profileId, profile.Model, result.LoadDurationNanoseconds, cancellationToken);
                     needsColdObservation = false;
@@ -324,21 +329,38 @@ public sealed class ClassifierRunExecutor(
                 ClassifierRunId = runId,
                 ClassifierRunProfileId = profileId,
                 EvaluationCorpusItemId = item.Id,
-                Status = ClassifierResultStatus.Completed,
-                Recommendation = response.Output.Recommendation,
-                Confidence = response.Output.Confidence,
-                Category = response.Output.Category,
-                ReasonCodesJson = JsonSerializer.Serialize(response.Output.ReasonCodes.Select(ClassifierOutputValidator.ReasonCodeValue)),
-                Rationale = response.Output.Rationale,
-                ThinkingPresent = response.Metrics.ThinkingPresent,
-                ThinkingCharacterCount = response.Metrics.ThinkingCharacterCount,
+                Status = response.Output is null ? ClassifierResultStatus.SchemaFailure : ClassifierResultStatus.Completed,
+                Recommendation = response.Output?.Recommendation,
+                Confidence = response.Output?.Confidence,
+                Category = response.Output?.Category,
+                ReasonCodesJson = response.Output is null
+                    ? null
+                    : JsonSerializer.Serialize(response.Output.ReasonCodes.Select(ClassifierOutputValidator.ReasonCodeValue)),
+                Rationale = prompt.ResponseProtocol == ClassifierResponseProtocol.StrictV1 ? response.Output?.Rationale : null,
+                PrimaryResponse = response.PrimaryResponse,
+                RepairResponse = response.RepairResponse,
+                PrimaryExplanation = response.PrimaryExplanation,
+                RawReasonCodesJson = JsonSerializer.Serialize(response.RawReasonCodes),
+                NormalizationMode = response.NormalizationMode,
+                NormalizationWarningsJson = JsonSerializer.Serialize(response.NormalizationWarnings),
+                SemanticWarningsJson = JsonSerializer.Serialize(response.SemanticWarnings),
+                FailureCode = response.NormalizationFailureCode,
+                RepairFailureCode = response.RepairFailureCode,
+                ThinkingPresent = response.PrimaryMetrics.ThinkingPresent,
+                ThinkingCharacterCount = response.PrimaryMetrics.ThinkingCharacterCount,
                 IsColdLoadRequest = isColdLoad,
-                TotalDurationNanoseconds = response.Metrics.TotalDurationNanoseconds,
-                LoadDurationNanoseconds = response.Metrics.LoadDurationNanoseconds,
-                PromptEvalCount = response.Metrics.PromptEvalCount,
-                PromptEvalDurationNanoseconds = response.Metrics.PromptEvalDurationNanoseconds,
-                EvalCount = response.Metrics.EvalCount,
-                EvalDurationNanoseconds = response.Metrics.EvalDurationNanoseconds,
+                TotalDurationNanoseconds = response.PrimaryMetrics.TotalDurationNanoseconds,
+                LoadDurationNanoseconds = response.PrimaryMetrics.LoadDurationNanoseconds,
+                PromptEvalCount = response.PrimaryMetrics.PromptEvalCount,
+                PromptEvalDurationNanoseconds = response.PrimaryMetrics.PromptEvalDurationNanoseconds,
+                EvalCount = response.PrimaryMetrics.EvalCount,
+                EvalDurationNanoseconds = response.PrimaryMetrics.EvalDurationNanoseconds,
+                RepairTotalDurationNanoseconds = response.RepairMetrics?.TotalDurationNanoseconds,
+                RepairLoadDurationNanoseconds = response.RepairMetrics?.LoadDurationNanoseconds,
+                RepairPromptEvalCount = response.RepairMetrics?.PromptEvalCount,
+                RepairPromptEvalDurationNanoseconds = response.RepairMetrics?.PromptEvalDurationNanoseconds,
+                RepairEvalCount = response.RepairMetrics?.EvalCount,
+                RepairEvalDurationNanoseconds = response.RepairMetrics?.EvalDurationNanoseconds,
                 StartedAtUtc = started,
                 CompletedAtUtc = timeProvider.GetUtcNow().UtcDateTime
             };
@@ -454,6 +476,15 @@ public sealed class ClassifierRunExecutor(
         run.StartedAtUtc ??= timeProvider.GetUtcNow().UtcDateTime;
         run.UpdatedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<bool> IsHoldoutRunAsync(string runId, CancellationToken cancellationToken)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        return await db.ClassifierRuns
+            .Where(item => item.Id == runId)
+            .Select(item => item.Stage == ClassifierRunStage.Holdout)
+            .SingleAsync(cancellationToken);
     }
 
     private async Task<ClassifierRunProfile[]> LoadProfilesAsync(string runId, CancellationToken cancellationToken)
