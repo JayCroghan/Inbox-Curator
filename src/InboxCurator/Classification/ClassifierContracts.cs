@@ -22,7 +22,23 @@ public sealed record ClusterClassifierInput(
     [property: JsonPropertyName("listUnsubscribePercentage")] double ListUnsubscribePercentage,
     [property: JsonPropertyName("attachmentCount")] int AttachmentCount,
     [property: JsonPropertyName("attachmentPercentage")] double AttachmentPercentage,
-    [property: JsonPropertyName("representativeSubjects")] IReadOnlyList<string> RepresentativeSubjects);
+    [property: JsonPropertyName("representativeSubjects")] IReadOnlyList<string> RepresentativeSubjects)
+{
+    [JsonPropertyName("unreadPercentage")]
+    public double UnreadPercentage => Percentage(UnreadCount, MessageCount);
+
+    [JsonPropertyName("starredPercentage")]
+    public double StarredPercentage => Percentage(StarredCount, MessageCount);
+
+    [JsonPropertyName("importantPercentage")]
+    public double ImportantPercentage => Percentage(ImportantCount, MessageCount);
+
+    [JsonPropertyName("relationshipPercentage")]
+    public double RelationshipPercentage => Percentage(RelationshipCount, MessageCount);
+
+    private static double Percentage(int count, int total) =>
+        total == 0 ? 0 : Math.Round(count * 100d / total, 1, MidpointRounding.AwayFromZero);
+}
 
 public sealed record ClassifierPromptSnapshot(
     string Version,

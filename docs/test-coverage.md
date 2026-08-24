@@ -4,14 +4,14 @@
 - Target: .NET 10 (`net10.0`)
 - Test runner: xUnit through Microsoft.NET.Test.Sdk
 - Collector: coverlet XPlat Code Coverage (Cobertura)
-- Result: **86 passed, 0 failed, 0 skipped**
+- Result: **87 passed, 0 failed, 0 skipped**
 
 ## Coverage
 
 | Metric | Covered | Valid | Rate |
 | --- | ---: | ---: | ---: |
-| Lines | 7,545 | 8,151 | **92.56%** |
-| Branches | 1,305 | 1,714 | **76.13%** |
+| Lines | 7,571 | 8,177 | **92.58%** |
+| Branches | 1,308 | 1,716 | **76.22%** |
 
 The denominator includes generated Razor Page classes and source-generated regular-expression code. Gmail's live installed-app/browser authorization and real network transport are deliberately not exercised by the offline suite; the OAuth scope, transient-status classification, delay curve, metadata mapping, and scanner behavior are tested at their local boundaries.
 
@@ -37,7 +37,7 @@ The denominator includes generated Razor Page classes and source-generated regul
 - EF Core migration/startup, synthetic seeding, Razor rendering, and response security headers
 - Eligible ground-truth selection, conditional/deferred exclusions, frozen-evidence immutability, and absence of ground truth/body fields from classifier input
 - Deterministic oldest/newest/time-distributed subject sampling and fixed-seed stratified development/validation/holdout assignment
-- Prompt-injection subjects remain inert untrusted input under immutable V1 and V2 contracts
+- Prompt-injection subjects remain inert untrusted input under immutable V1, V2, and V3 contracts
 - Historical V1 strict structured-output validation remains readable and unchanged
 - V2 tolerant normalization accepts duplicate/excess/unknown reason codes, defaults optional diagnostics, preserves rich explanations, and tolerates extra properties
 - One-shot same-model repair receives only the primary response and contributes only a recommendation; primary confidence/category/reasons/explanation remain authoritative and repair cannot elevate confidence
@@ -47,9 +47,10 @@ The denominator includes generated Razor Page classes and source-generated regul
 - Ollama installed-model checks without pulls, infinite inference HTTP timeout with caller cancellation, actual JSON Schema payloads, exact five-profile think modes, metrics, `/api/ps` residency, and `keep_alive=0` unload
 - Model-at-a-time execution order, resident-model cold-load preconditioning, failed-normalization cold metrics, durable item failures, resume skipping, cancellation state, and explicit unload boundaries
 - Completed-development prerequisite and durable prompt/corpus pinning, including holdout isolation from later corpora
-- Explicit persisted-corpus and prompt selection for V2 reruns, with holdout execution/details unavailable, synthetic safety scoreboard rendering, no recommendation acceptance, and no Gmail calls from the classifier page
+- Explicit persisted-corpus and prompt selection for V2/V3 reruns, with V3 as the development default, holdout execution/details unavailable, synthetic safety scoreboard rendering, no recommendation acceptance, and no Gmail calls from the classifier page
 - Read-only disagreement, self-repaired, semantic-warning, normalization-warning, and all-result inspection views include agreeing results where appropriate and Razor-encode stored model content
 - Additive V2 response/repair, repair-response, and schema-hash migration fields preserve historical V1 prompt/run rows
+- Immutable V3 prompt persistence and hashing, exact V2 output/repair-contract reuse, and deterministic unread/starred/important/relationship percentages including zero-message safety
 
 ## Reproduce
 

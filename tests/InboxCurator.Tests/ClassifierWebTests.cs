@@ -16,18 +16,25 @@ namespace InboxCurator.Tests;
 public sealed class ClassifierWebTests
 {
     [Fact]
-    public async Task ClassifierLab_DefaultsToV2ExplicitCorpusAndNeverExposesHoldoutOrCallsGmail()
+    public async Task ClassifierLab_DefaultsToV3ExplicitCorpusAndNeverExposesHoldoutOrCallsGmail()
     {
         using var factory = new ClassifierFactory();
         using var client = factory.CreateClient();
 
         var initial = await client.GetStringAsync("/Classifier");
         Assert.Contains("Classifier Lab", initial, StringComparison.Ordinal);
+        Assert.Contains(ClassifierPromptV3Definition.Version, initial, StringComparison.Ordinal);
         Assert.Contains(ClassifierPromptV2Definition.Version, initial, StringComparison.Ordinal);
+        Assert.Matches(
+            $"<option[^>]+value=\"{Regex.Escape(ClassifierPromptV3Definition.Version)}\"[^>]+selected=",
+            initial);
+        Assert.DoesNotMatch(
+            $"<option[^>]+value=\"{Regex.Escape(ClassifierPromptV2Definition.Version)}\"[^>]+selected=",
+            initial);
         Assert.Contains(ClassifierPromptV2Definition.RepairPromptVersion, initial, StringComparison.Ordinal);
         Assert.Contains("Human KEEP", initial, StringComparison.Ordinal);
         Assert.Contains("Model UNWANTED", initial, StringComparison.Ordinal);
-        Assert.Contains("Holdout execution is disabled in MAIL-003A.1", initial, StringComparison.Ordinal);
+        Assert.Contains("Holdout execution is disabled in MAIL-003A.2", initial, StringComparison.Ordinal);
         Assert.DoesNotContain("name=\"Stage\" value=\"Holdout\"", initial, StringComparison.Ordinal);
         Assert.Empty(factory.Gmail.ListRequests);
 
@@ -44,7 +51,7 @@ public sealed class ClassifierWebTests
             await using (var db = await dbFactory.CreateDbContextAsync())
             {
                 var prompt = await db.ClassifierPromptVersions.SingleAsync(
-                    item => item.Version == ClassifierPromptV2Definition.Version);
+                    item => item.Version == ClassifierPromptV3Definition.Version);
                 db.ClassifierRuns.Add(new ClassifierRun
                 {
                     Id = "web-completed-development",
@@ -60,7 +67,7 @@ public sealed class ClassifierWebTests
             }
 
             await scope.ServiceProvider.GetRequiredService<ClassifierPromptService>()
-                .LockAsync(ClassifierPromptV2Definition.Version, corpus.Id);
+                .LockAsync(ClassifierPromptV3Definition.Version, corpus.Id);
         }
 
         var locked = await client.GetStringAsync("/Classifier");

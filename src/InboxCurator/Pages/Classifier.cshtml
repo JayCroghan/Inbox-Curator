@@ -8,14 +8,14 @@
 <div class="lab-workspace">
     <section class="lab-heading">
         <div>
-            <p class="eyebrow">MAIL-003A.1 · local evaluation laboratory</p>
+            <p class="eyebrow">MAIL-003A.2 · local evaluation laboratory</p>
             <h1>Measure judgment.<br /><em>Protect the keep pile.</em></h1>
-            <p class="heading-note">V2 separates rich model judgment from machine normalization. Models see frozen census evidence—not bodies, credentials, decisions, ground-truth labels, or holdout items.</p>
+            <p class="heading-note">V3 sharpens KEEP, UNWANTED, and NEEDS_REVIEW policy while retaining V2's rich-response normalization. Models see frozen census evidence—not bodies, credentials, decisions, ground-truth labels, or holdout items.</p>
         </div>
         <aside class="lab-safety-callout" aria-label="Primary safety metric">
             <span>Primary safety metric</span>
             <strong>Human KEEP → Model UNWANTED</strong>
-            <p>Development remains preflight. The locked holdout is untouched while V2 response behavior is evaluated.</p>
+            <p>Development remains preflight. The locked holdout is untouched while V3 decision policy is evaluated.</p>
         </aside>
     </section>
 
@@ -72,7 +72,7 @@
             {
                 <p class="lab-micro"><strong>Pinned corpus:</strong> @Model.Snapshot.Prompt.LockedEvaluationCorpusVersion · ID @Model.Snapshot.Prompt.LockedEvaluationCorpusId</p>
             }
-            <p class="lab-micro">Mailbox strings and candidate responses are untrusted data. V2 preserves the primary explanation and uses at most one extraction-only repair call.</p>
+            <p class="lab-micro">Mailbox strings and candidate responses are untrusted data. V3 reuses V2's immutable output and extraction-only repair contracts.</p>
             <details class="lab-disclosure">
                 <summary>Immutable response protocols</summary>
                 @foreach (var promptVersion in Model.Snapshot.Prompts)
@@ -85,7 +85,7 @@
                 <form method="post" asp-page-handler="LockPrompt">
                     <input type="hidden" name="corpusId" value="@lockCorpus.Id" />
                     <input type="hidden" name="promptVersion" value="@Model.Snapshot.Prompt.Version" />
-                    <button class="lab-secondary-button" type="submit">Lock V2 to this corpus</button>
+                    <button class="lab-secondary-button" type="submit">Lock this prompt to this corpus</button>
                 </form>
             }
         </article>
@@ -126,7 +126,7 @@
                     <select name="PromptVersion" required>
                         @foreach (var availablePrompt in Model.Snapshot.Prompts)
                         {
-                            <option value="@availablePrompt.Version" selected="@(availablePrompt.Version == ClassifierPromptV2Definition.Version)">@availablePrompt.Version · @availablePrompt.ResponseProtocol</option>
+                            <option value="@availablePrompt.Version" selected="@(availablePrompt.Version == ClassifierPromptV3Definition.Version)">@availablePrompt.Version · @availablePrompt.ResponseProtocol</option>
                         }
                     </select>
                 </label>
@@ -140,7 +140,7 @@
             </fieldset>
             <div class="run-actions">
                 <button type="submit" @(Model.Snapshot.Corpus is null || selectedRun?.IsActive == true ? "disabled" : null)>Run development + validation</button>
-                <span class="lab-micro">Holdout execution is disabled in MAIL-003A.1.</span>
+                <span class="lab-micro">Holdout execution is disabled in MAIL-003A.2.</span>
             </div>
         </form>
     </section>
@@ -223,7 +223,7 @@
                     </tbody>
                 </table>
             </div>
-            <p class="lab-micro">* Binary accuracy excludes abstentions. Primary and repair timings are separate; cold primary requests are excluded from steady-state latency and throughput. V1 is strict-schema; V2 is primary normalization plus recommendation-only repair.</p>
+            <p class="lab-micro">* Binary accuracy excludes abstentions. Primary and repair timings are separate; cold primary requests are excluded from steady-state latency and throughput. V1 is strict-schema; V2 introduced primary normalization plus recommendation-only repair; V3 reuses that protocol with refined decision policy.</p>
         </section>
 
         <section class="disagreement-section">
@@ -250,7 +250,7 @@
             </div>
             @if (!Model.Snapshot.HoldoutDetailsVisible)
             {
-                <div class="locked-details">Holdout examples are not exposed or executed in MAIL-003A.1.</div>
+                <div class="locked-details">Holdout examples are not exposed or executed in MAIL-003A.2.</div>
             }
             else if (Model.Snapshot.InspectionResults.Count == 0)
             {

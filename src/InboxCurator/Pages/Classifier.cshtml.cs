@@ -36,7 +36,7 @@ public sealed class ClassifierModel(
     public long CorpusId { get; set; }
 
     [BindProperty]
-    public string PromptVersion { get; set; } = ClassifierPromptV2Definition.Version;
+    public string PromptVersion { get; set; } = ClassifierPromptV3Definition.Version;
 
     public ClassifierLabSnapshot Snapshot { get; private set; } = null!;
 

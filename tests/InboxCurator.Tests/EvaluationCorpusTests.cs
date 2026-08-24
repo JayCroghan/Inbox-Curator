@@ -90,6 +90,46 @@ public sealed class EvaluationCorpusTests
     }
 
     [Fact]
+    public void ClassifierInput_DerivesFrozenEvidencePercentagesWithZeroMessageSafety()
+    {
+        var item = new EvaluationCorpusItem
+        {
+            TargetType = ClusterTargetType.Sender,
+            TargetValue = "source@example.test",
+            GroupKey = "sender:source@example.test",
+            DisplayName = "Source",
+            GroundTruth = EvaluationGroundTruth.Keep,
+            MessageCount = 8,
+            UnreadCount = 3,
+            StarredCount = 1,
+            ImportantCount = 2,
+            RelationshipCount = 5,
+            RepresentativeSubjectsJson = "[]"
+        };
+
+        var input = ClassifierInputFactory.Create(item);
+        Assert.Equal(37.5, input.UnreadPercentage);
+        Assert.Equal(12.5, input.StarredPercentage);
+        Assert.Equal(25, input.ImportantPercentage);
+        Assert.Equal(62.5, input.RelationshipPercentage);
+
+        using var json = JsonDocument.Parse(ClassifierInputFactory.Serialize(input));
+        Assert.Equal(37.5, json.RootElement.GetProperty("unreadPercentage").GetDouble());
+        Assert.Equal(12.5, json.RootElement.GetProperty("starredPercentage").GetDouble());
+        Assert.Equal(25, json.RootElement.GetProperty("importantPercentage").GetDouble());
+        Assert.Equal(62.5, json.RootElement.GetProperty("relationshipPercentage").GetDouble());
+        Assert.False(json.RootElement.TryGetProperty("groundTruth", out _));
+        Assert.False(json.RootElement.TryGetProperty("decision", out _));
+
+        item.MessageCount = 0;
+        var emptyInput = ClassifierInputFactory.Create(item);
+        Assert.Equal(0, emptyInput.UnreadPercentage);
+        Assert.Equal(0, emptyInput.StarredPercentage);
+        Assert.Equal(0, emptyInput.ImportantPercentage);
+        Assert.Equal(0, emptyInput.RelationshipPercentage);
+    }
+
+    [Fact]
     public void SplitAssignment_IsDeterministicAndStratifiedWherePossible()
     {
         var first = BuildSplitItems();

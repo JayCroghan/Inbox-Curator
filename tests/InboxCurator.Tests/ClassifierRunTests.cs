@@ -237,7 +237,7 @@ public sealed class ClassifierRunTests
     }
 
     [Fact]
-    public async Task PromptLock_RequiresCompletedDevelopmentRunAndV2CanReuseExplicitCorpusWhileHoldoutStaysDisabled()
+    public async Task PromptLock_RequiresCompletedDevelopmentRunAndV3CanReuseExplicitCorpusWhileHoldoutStaysDisabled()
     {
         await using var store = new SqliteTestStore();
         await store.InitializeAsync();
@@ -309,22 +309,22 @@ public sealed class ClassifierRunTests
             ClassifierRunStage.Holdout,
             ["profile-a"],
             corpusAId,
-            ClassifierPromptV2Definition.Version,
+            ClassifierPromptV3Definition.Version,
             CancellationToken.None));
-        var v2RunId = await runService.CreateAsync(
+        var v3RunId = await runService.CreateAsync(
             ClassifierRunStage.DevelopmentValidation,
             ["profile-a"],
             corpusAId,
-            ClassifierPromptV2Definition.Version,
+            ClassifierPromptV3Definition.Version,
             CancellationToken.None);
 
         await using var verification = await store.Factory.CreateDbContextAsync();
-        var v2Run = await verification.ClassifierRuns
+        var v3Run = await verification.ClassifierRuns
             .Include(item => item.ClassifierPromptVersion)
-            .SingleAsync(item => item.Id == v2RunId);
-        Assert.Equal(corpusAId, v2Run.EvaluationCorpusId);
-        Assert.Equal(ClassifierPromptV2Definition.Version, v2Run.ClassifierPromptVersion.Version);
-        Assert.Equal(1, v2Run.TotalItems);
+            .SingleAsync(item => item.Id == v3RunId);
+        Assert.Equal(corpusAId, v3Run.EvaluationCorpusId);
+        Assert.Equal(ClassifierPromptV3Definition.Version, v3Run.ClassifierPromptVersion.Version);
+        Assert.Equal(1, v3Run.TotalItems);
     }
 
     private static async Task<string> SeedRunAsync(SqliteTestStore store, bool lockedPrompt, bool includeRun = true)
