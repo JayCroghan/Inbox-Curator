@@ -45,6 +45,10 @@ public sealed class DatabaseMigrationTests
             Assert.Single(await db.ClusterDecisions.ToListAsync());
             Assert.True(await db.Database.CanConnectAsync());
             Assert.Empty(await db.EvaluationCorpora.ToListAsync());
+            await db.Database.OpenConnectionAsync();
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('ClassifierResults') WHERE name = 'RepairResponse';";
+            Assert.Equal(1L, (long)(await command.ExecuteScalarAsync())!);
         }
         finally
         {

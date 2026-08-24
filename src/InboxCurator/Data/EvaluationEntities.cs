@@ -241,6 +241,7 @@ public sealed class ClassifierResult
     public string? ReasonCodesJson { get; set; }
     public string? Rationale { get; set; }
     public string? PrimaryResponse { get; set; }
+    public string? RepairResponse { get; set; }
     public string? PrimaryExplanation { get; set; }
     public string? RawReasonCodesJson { get; set; }
     public ClassifierNormalizationMode? NormalizationMode { get; set; }

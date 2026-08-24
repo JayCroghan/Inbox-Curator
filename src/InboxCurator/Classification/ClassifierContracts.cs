@@ -66,6 +66,7 @@ public sealed record ClassifierResponseMetrics(
 public sealed record ClusterClassifierResponse(
     ValidatedClassifierOutput? Output,
     string PrimaryResponse,
+    string? RepairResponse,
     string? PrimaryExplanation,
     IReadOnlyList<string> RawReasonCodes,
     ClassifierNormalizationMode NormalizationMode,

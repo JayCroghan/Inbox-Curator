@@ -124,7 +124,7 @@ public sealed class SyntheticEvaluationSeeder(
                             : "The source shows useful correspondence or retained transactional evidence.",
                     PrimaryResponse = isV2 ? JsonSerializer.Serialize(new
                     {
-                        recommendation = recommendation.ToString(),
+                        recommendation = itemIndex == 1 ? "candidate_declared_noncanonical" : recommendation.ToString(),
                         confidence = confidence.ToString(),
                         category = recommendation == ClassifierRecommendation.Unwanted ? "marketing" : "professional",
                         reasonCodes = recommendation == ClassifierRecommendation.Unwanted
@@ -134,6 +134,9 @@ public sealed class SyntheticEvaluationSeeder(
                             ? "Recurring promotional evidence dominates, with no material protected counterevidence."
                             : "Useful correspondence evidence outweighs recurring-noise signals and supports retention."
                     }) : null,
+                    RepairResponse = isV2 && itemIndex == 1
+                        ? JsonSerializer.Serialize(new { recommendation = recommendation.ToString() })
+                        : null,
                     PrimaryExplanation = isV2
                         ? recommendation == ClassifierRecommendation.Unwanted
                             ? "Recurring promotional evidence dominates, with no material protected counterevidence."

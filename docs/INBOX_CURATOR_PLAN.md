@@ -902,11 +902,11 @@ V2 preserves V1 and all historical runs unchanged, reuses an explicitly selected
 
 1. a relaxed primary response containing the candidate judgment and user-visible audit explanation;
 2. tolerant application normalization for confidence, category, and reason-code diagnostics;
-3. one extraction-only repair call on the same loaded model only when no usable recommendation can be derived directly.
+3. one recommendation-only extraction call on the same loaded model only when no usable recommendation can be derived directly.
 
-`MAIL-003A-PROMPT-V2`, `MAIL-003A-OUTPUT-V2`, and `MAIL-003A-REPAIR-V1` are immutable and hash-persisted. The complete primary final response and explanation remain local in SQLite; thinking traces are never stored. Duplicate, unknown, missing, or excessive diagnostic fields are non-fatal, while unresolved recommendation extraction is recorded as a normalization failure. Conservative semantic warnings surface recommendation/explanation contradictions without changing the model's judgment.
+`MAIL-003A-PROMPT-V2`, `MAIL-003A-OUTPUT-V2`, and `MAIL-003A-REPAIR-V1` are immutable and hash-persisted. Repair extracts only the candidate's recommendation. Primary normalization remains authoritative for confidence, category, normalized/raw reason codes, warnings, and the complete explanation; missing primary confidence therefore stays Low and repair can never elevate it. The complete primary and repair final responses remain local in SQLite; thinking traces are never stored. Duplicate, unknown, missing, or excessive diagnostic fields are non-fatal, while unresolved recommendation extraction is recorded as a normalization failure. Conservative semantic warnings surface recommendation/explanation contradictions without changing the model's judgment.
 
-Primary and repair timing/token metrics are persisted separately. The first returned primary response supplies the cold-load observation even if direct normalization and repair ultimately fail. V1 and V2 remain visibly distinct in the scoreboard.
+Primary and repair timing/token metrics are persisted separately. The first returned primary response supplies the cold-load observation even if direct normalization and repair ultimately fail. V1 and V2 remain visibly distinct in the scoreboard. Read-only inspection views expose disagreements/failures, all self-repaired results, semantic warnings, normalization warnings, or all evaluated results without changing human decisions.
 
 Development/validation is the only executable stage in MAIL-003A.1. Corpus selection is explicit, holdout items are neither exposed nor executed, and unknown sources remain untouched.
 

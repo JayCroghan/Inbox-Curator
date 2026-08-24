@@ -4,14 +4,14 @@
 - Target: .NET 10 (`net10.0`)
 - Test runner: xUnit through Microsoft.NET.Test.Sdk
 - Collector: coverlet XPlat Code Coverage (Cobertura)
-- Result: **82 passed, 0 failed, 0 skipped**
+- Result: **86 passed, 0 failed, 0 skipped**
 
 ## Coverage
 
 | Metric | Covered | Valid | Rate |
 | --- | ---: | ---: | ---: |
-| Lines | 7,437 | 8,015 | **92.78%** |
-| Branches | 1,271 | 1,680 | **75.65%** |
+| Lines | 7,545 | 8,151 | **92.56%** |
+| Branches | 1,305 | 1,714 | **76.13%** |
 
 The denominator includes generated Razor Page classes and source-generated regular-expression code. Gmail's live installed-app/browser authorization and real network transport are deliberately not exercised by the offline suite; the OAuth scope, transient-status classification, delay curve, metadata mapping, and scanner behavior are tested at their local boundaries.
 
@@ -40,14 +40,16 @@ The denominator includes generated Razor Page classes and source-generated regul
 - Prompt-injection subjects remain inert untrusted input under immutable V1 and V2 contracts
 - Historical V1 strict structured-output validation remains readable and unchanged
 - V2 tolerant normalization accepts duplicate/excess/unknown reason codes, defaults optional diagnostics, preserves rich explanations, and tolerates extra properties
-- One-shot same-model repair receives only the primary response, never corpus evidence or ground truth; successful repair is scored and unresolved repair is recorded once
+- One-shot same-model repair receives only the primary response and contributes only a recommendation; primary confidence/category/reasons/explanation remain authoritative and repair cannot elevate confidence
+- Complete repair-response persistence without thinking text, including separate repair metrics and unresolved repair diagnostics
 - Semantic contradiction warnings, raw diagnostic retention, thinking-trace non-persistence, and separate primary/repair timing counters
 - Dangerous KEEP → UNWANTED, high-confidence safety gate, incomplete holdout states, unwanted precision, abstention, coverage, and steady-state performance scoring
 - Ollama installed-model checks without pulls, infinite inference HTTP timeout with caller cancellation, actual JSON Schema payloads, exact five-profile think modes, metrics, `/api/ps` residency, and `keep_alive=0` unload
 - Model-at-a-time execution order, resident-model cold-load preconditioning, failed-normalization cold metrics, durable item failures, resume skipping, cancellation state, and explicit unload boundaries
 - Completed-development prerequisite and durable prompt/corpus pinning, including holdout isolation from later corpora
-- Explicit persisted-corpus and prompt selection for V2 reruns, with holdout execution/details unavailable, synthetic safety scoreboard/disagreement rendering, no recommendation acceptance, and no Gmail calls from the classifier page
-- Additive V2 response/repair and schema-hash migrations preserve historical V1 prompt/run rows
+- Explicit persisted-corpus and prompt selection for V2 reruns, with holdout execution/details unavailable, synthetic safety scoreboard rendering, no recommendation acceptance, and no Gmail calls from the classifier page
+- Read-only disagreement, self-repaired, semantic-warning, normalization-warning, and all-result inspection views include agreeing results where appropriate and Razor-encode stored model content
+- Additive V2 response/repair, repair-response, and schema-hash migration fields preserve historical V1 prompt/run rows
 
 ## Reproduce
 

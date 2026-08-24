@@ -104,11 +104,96 @@ public sealed class ClassifierWebTests
         Assert.Contains(ClassifierPromptV2Definition.Version, html, StringComparison.Ordinal);
         Assert.Contains("NormalizeRepairV2", html, StringComparison.Ordinal);
         Assert.Contains("Repaired", html, StringComparison.Ordinal);
-        Assert.Contains("Disagreements", html, StringComparison.Ordinal);
+        Assert.Contains("Disagreements &amp; failures", html, StringComparison.Ordinal);
+        Assert.Contains("Self-repaired results", html, StringComparison.Ordinal);
+        Assert.Contains("Semantic warnings", html, StringComparison.Ordinal);
+        Assert.Contains("Normalization warnings", html, StringComparison.Ordinal);
+        Assert.Contains("All evaluated results", html, StringComparison.Ordinal);
         Assert.Contains("deepseek-r1-32b-thinking", html, StringComparison.Ordinal);
         Assert.Contains("frozen evidence only", html, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Primary explanation", html, StringComparison.Ordinal);
         Assert.DoesNotContain("Accept recommendation", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(factory.Gmail.ListRequests);
+    }
+
+    [Fact]
+    public async Task InspectionViews_IncludeAgreeingRepairedAndWarnedResultsWithoutMutatingMailboxState()
+    {
+        using var factory = new ClassifierFactory(seedEvaluation: true);
+        using var client = factory.CreateClient();
+        string runId;
+        long profileId;
+        string displayName;
+        string disagreementDisplayName;
+        int decisionCount;
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<InboxCuratorDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            decisionCount = await db.ClusterDecisions.CountAsync();
+            var result = await db.ClassifierResults
+                .Include(item => item.EvaluationCorpusItem)
+                .Include(item => item.ClassifierRun)
+                    .ThenInclude(item => item.ClassifierPromptVersion)
+                .Where(item => item.ClassifierRun.ClassifierPromptVersion.Version == ClassifierPromptV2Definition.Version &&
+                    item.Status == ClassifierResultStatus.Completed &&
+                    ((item.EvaluationCorpusItem.GroundTruth == EvaluationGroundTruth.Keep && item.Recommendation == ClassifierRecommendation.Keep) ||
+                     (item.EvaluationCorpusItem.GroundTruth == EvaluationGroundTruth.Unwanted && item.Recommendation == ClassifierRecommendation.Unwanted)))
+                .FirstAsync();
+            runId = result.ClassifierRunId;
+            profileId = result.ClassifierRunProfileId;
+            displayName = result.EvaluationCorpusItem.DisplayName;
+            result.NormalizationMode = ClassifierNormalizationMode.SelfRepaired;
+            result.PrimaryExplanation = "Primary <evidence> remains unchanged.";
+            result.PrimaryResponse = "{\"recommendation\":\"noncanonical\",\"explanation\":\"<script>primary</script>\"}";
+            var repairRecommendation = result.Recommendation == ClassifierRecommendation.Keep ? "keep" : "unwanted";
+            result.RepairResponse = $"{{\"recommendation\":\"{repairRecommendation}\",\"extra\":\"<script>repair</script>\"}}";
+            result.NormalizationWarningsJson = "[\"recommendation_unrecognized\"]";
+            result.SemanticWarningsJson = "[\"test_semantic_warning\"]";
+            var disagreement = await db.ClassifierResults
+                .Include(item => item.EvaluationCorpusItem)
+                .Where(item => item.ClassifierRunProfileId == profileId && item.Id != result.Id)
+                .FirstAsync();
+            disagreement.Status = ClassifierResultStatus.Completed;
+            disagreement.Recommendation = disagreement.EvaluationCorpusItem.GroundTruth == EvaluationGroundTruth.Keep
+                ? ClassifierRecommendation.Unwanted
+                : ClassifierRecommendation.Keep;
+            disagreementDisplayName = disagreement.EvaluationCorpusItem.DisplayName;
+            await db.SaveChangesAsync();
+        }
+
+        var defaultView = await client.GetStringAsync($"/Classifier?runId={runId}&profileId={profileId}");
+        Assert.Contains("Disagreements &amp; failures", defaultView, StringComparison.Ordinal);
+        Assert.DoesNotContain(displayName, defaultView, StringComparison.Ordinal);
+        Assert.Contains(disagreementDisplayName, defaultView, StringComparison.Ordinal);
+
+        var repairedView = await client.GetStringAsync(
+            $"/Classifier?runId={runId}&profileId={profileId}&inspectionMode=SelfRepaired");
+        Assert.Contains(displayName, repairedView, StringComparison.Ordinal);
+        Assert.Contains("Stored primary final response", repairedView, StringComparison.Ordinal);
+        Assert.Contains("Stored repair final response", repairedView, StringComparison.Ordinal);
+        Assert.Contains("Primary &lt;evidence&gt; remains unchanged.", repairedView, StringComparison.Ordinal);
+        Assert.Contains("&lt;script&gt;repair&lt;/script&gt;", repairedView, StringComparison.Ordinal);
+        Assert.DoesNotContain("<script>repair</script>", repairedView, StringComparison.Ordinal);
+
+        var semanticView = await client.GetStringAsync(
+            $"/Classifier?runId={runId}&profileId={profileId}&inspectionMode=SemanticWarnings");
+        Assert.Contains(displayName, semanticView, StringComparison.Ordinal);
+        Assert.Contains("test_semantic_warning", semanticView, StringComparison.Ordinal);
+
+        var normalizationView = await client.GetStringAsync(
+            $"/Classifier?runId={runId}&profileId={profileId}&inspectionMode=NormalizationWarnings");
+        Assert.Contains(displayName, normalizationView, StringComparison.Ordinal);
+        Assert.Contains("recommendation_unrecognized", normalizationView, StringComparison.Ordinal);
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<InboxCuratorDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            Assert.Equal(decisionCount, await db.ClusterDecisions.CountAsync());
+        }
+
         Assert.Empty(factory.Gmail.ListRequests);
     }
 

@@ -195,6 +195,9 @@ namespace InboxCurator.Data.Migrations
                     b.Property<long?>("RepairPromptEvalDurationNanoseconds")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("RepairResponse")
+                        .HasColumnType("TEXT");
+
                     b.Property<long?>("RepairTotalDurationNanoseconds")
                         .HasColumnType("INTEGER");
 

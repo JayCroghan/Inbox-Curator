@@ -5,9 +5,27 @@ using InboxCurator.Data;
 namespace InboxCurator.Classification;
 
 public sealed record ClassifierNormalizationAttempt(
-    ValidatedClassifierOutput? Output,
+    ClassifierRecommendation? Recommendation,
+    ClassifierConfidence Confidence,
+    ClassifierCategory Category,
+    IReadOnlyList<ClassifierReasonCode> ReasonCodes,
     string? Explanation,
     IReadOnlyList<string> RawReasonCodes,
+    IReadOnlyList<string> Warnings,
+    string? FailureCode)
+{
+    public ValidatedClassifierOutput? Output => Recommendation.HasValue
+        ? new ValidatedClassifierOutput(
+            Recommendation.Value,
+            Confidence,
+            Category,
+            ReasonCodes,
+            Explanation ?? string.Empty)
+        : null;
+}
+
+public sealed record ClassifierRepairNormalizationAttempt(
+    ClassifierRecommendation? Recommendation,
     IReadOnlyList<string> Warnings,
     string? FailureCode);
 
@@ -74,7 +92,48 @@ public static class ClassifierOutputNormalizer
 
     public static ClassifierNormalizationAttempt NormalizePrimary(string json) => Normalize(json, requireExplanation: true);
 
-    public static ClassifierNormalizationAttempt NormalizeRepair(string json) => Normalize(json, requireExplanation: false);
+    public static ClassifierRepairNormalizationAttempt NormalizeRepairRecommendation(string json)
+    {
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(json);
+        }
+        catch (JsonException)
+        {
+            return new ClassifierRepairNormalizationAttempt(null, ["repair_invalid_json"], "invalid_json");
+        }
+
+        using (document)
+        {
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return new ClassifierRepairNormalizationAttempt(
+                    null,
+                    ["repair_invalid_json_object"],
+                    "invalid_json_object");
+            }
+
+            var recommendationValue = ReadString(document.RootElement, "recommendation");
+            if (recommendationValue is null)
+            {
+                return new ClassifierRepairNormalizationAttempt(
+                    null,
+                    ["repair_recommendation_missing"],
+                    "recommendation_missing");
+            }
+
+            if (!Recommendations.TryGetValue(NormalizeToken(recommendationValue), out var recommendation))
+            {
+                return new ClassifierRepairNormalizationAttempt(
+                    null,
+                    ["repair_recommendation_unrecognized"],
+                    "recommendation_unrecognized");
+            }
+
+            return new ClassifierRepairNormalizationAttempt(recommendation, [], null);
+        }
+    }
 
     public static IReadOnlyList<string> SemanticWarnings(ValidatedClassifierOutput output)
     {
@@ -109,14 +168,30 @@ public static class ClassifierOutputNormalizer
         }
         catch (JsonException)
         {
-            return new ClassifierNormalizationAttempt(null, null, [], ["invalid_json"], "invalid_json");
+            return new ClassifierNormalizationAttempt(
+                null,
+                ClassifierConfidence.Low,
+                ClassifierCategory.Unknown,
+                [],
+                null,
+                [],
+                ["invalid_json"],
+                "invalid_json");
         }
 
         using (document)
         {
             if (document.RootElement.ValueKind != JsonValueKind.Object)
             {
-                return new ClassifierNormalizationAttempt(null, null, [], ["invalid_json_object"], "invalid_json_object");
+                return new ClassifierNormalizationAttempt(
+                    null,
+                    ClassifierConfidence.Low,
+                    ClassifierCategory.Unknown,
+                    [],
+                    null,
+                    [],
+                    ["invalid_json_object"],
+                    "invalid_json_object");
             }
 
             var root = document.RootElement;
@@ -188,23 +263,35 @@ public static class ClassifierOutputNormalizer
             {
                 warnings.Add("recommendation_missing");
                 return new ClassifierNormalizationAttempt(
-                    null, explanation, rawReasonCodes, warnings, "recommendation_missing");
+                    null,
+                    confidence,
+                    category,
+                    normalizedReasonCodes,
+                    explanation,
+                    rawReasonCodes,
+                    warnings,
+                    "recommendation_missing");
             }
 
             if (!Recommendations.TryGetValue(NormalizeToken(recommendationValue), out var recommendation))
             {
                 warnings.Add("recommendation_unrecognized");
                 return new ClassifierNormalizationAttempt(
-                    null, explanation, rawReasonCodes, warnings, "recommendation_unrecognized");
-            }
-
-            return new ClassifierNormalizationAttempt(
-                new ValidatedClassifierOutput(
-                    recommendation,
+                    null,
                     confidence,
                     category,
                     normalizedReasonCodes,
-                    explanation ?? string.Empty),
+                    explanation,
+                    rawReasonCodes,
+                    warnings,
+                    "recommendation_unrecognized");
+            }
+
+            return new ClassifierNormalizationAttempt(
+                recommendation,
+                confidence,
+                category,
+                normalizedReasonCodes,
                 explanation,
                 rawReasonCodes,
                 warnings,

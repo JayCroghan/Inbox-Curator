@@ -26,6 +26,9 @@ public sealed class ClassifierModel(
     [BindProperty(SupportsGet = true)]
     public int ErrorPage { get; set; } = 1;
 
+    [BindProperty(SupportsGet = true)]
+    public ClassifierInspectionMode InspectionMode { get; set; } = ClassifierInspectionMode.Disagreements;
+
     [BindProperty]
     public List<string> SelectedProfiles { get; set; } = [];
 
@@ -41,7 +44,23 @@ public sealed class ClassifierModel(
     public string? Notice { get; set; }
 
     public async Task OnGetAsync(CancellationToken cancellationToken) =>
-        Snapshot = await lab.GetAsync(RunId, ProfileId, ScoreSort, Direction, ErrorPage, cancellationToken);
+        Snapshot = await lab.GetAsync(
+            RunId,
+            ProfileId,
+            ScoreSort,
+            Direction,
+            InspectionMode,
+            ErrorPage,
+            cancellationToken);
+
+    public static string InspectionLabel(ClassifierInspectionMode mode) => mode switch
+    {
+        ClassifierInspectionMode.SelfRepaired => "Self-repaired results",
+        ClassifierInspectionMode.SemanticWarnings => "Semantic warnings",
+        ClassifierInspectionMode.NormalizationWarnings => "Normalization warnings",
+        ClassifierInspectionMode.All => "All evaluated results",
+        _ => "Disagreements & failures"
+    };
 
     public async Task<IActionResult> OnPostCreateCorpusAsync(CancellationToken cancellationToken)
     {

@@ -195,10 +195,12 @@ public sealed class ClassifierRunTests
         Assert.Equal(ClassifierResultStatus.SchemaFailure, results[0].Status);
         Assert.Equal(ClassifierNormalizationMode.Failed, results[0].NormalizationMode);
         Assert.Equal("unusable primary response", results[0].PrimaryResponse);
+        Assert.Equal("still unusable repair response", results[0].RepairResponse);
         Assert.True(results[0].IsColdLoadRequest);
         Assert.Equal(1_500_000_000, results[0].RepairTotalDurationNanoseconds);
         Assert.Equal(ClassifierResultStatus.Completed, results[1].Status);
         Assert.Equal(ClassifierNormalizationMode.SelfRepaired, results[1].NormalizationMode);
+        Assert.Equal("{\"recommendation\":\"keep\"}", results[1].RepairResponse);
         Assert.False(results[1].IsColdLoadRequest);
         Assert.Equal(2_500_000_000, results[1].RepairTotalDurationNanoseconds);
     }
@@ -431,6 +433,7 @@ public sealed class ClassifierRunTests
                 return Task.FromResult(new ClusterClassifierResponse(
                     null,
                     "unusable primary response",
+                    "still unusable repair response",
                     null,
                     ["unknown_reason"],
                     ClassifierNormalizationMode.Failed,
@@ -452,6 +455,7 @@ public sealed class ClassifierRunTests
                         [ClassifierReasonCode.ProfessionalContent],
                         "The original explanation remains visible."),
                     "{\"recommendation\":\"retain\",\"explanation\":\"The original explanation remains visible.\"}",
+                    "{\"recommendation\":\"keep\"}",
                     "The original explanation remains visible.",
                     ["professional_content"],
                     ClassifierNormalizationMode.SelfRepaired,
@@ -471,6 +475,7 @@ public sealed class ClassifierRunTests
                     [ClassifierReasonCode.ProfessionalContent],
                     "Synthetic valid result."),
                 "{\"recommendation\":\"keep\"}",
+                null,
                 "Synthetic valid result.",
                 ["professional_content"],
                 ClassifierNormalizationMode.Direct,

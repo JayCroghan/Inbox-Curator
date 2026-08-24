@@ -74,6 +74,23 @@ public sealed class ClassifierV2NormalizationTests
     }
 
     [Fact]
+    public void UnusableRecommendation_PreservesPartiallyNormalizedPrimaryFieldsForRepairComposition()
+    {
+        var result = ClassifierOutputNormalizer.NormalizePrimary("""
+            {"recommendation":"archive_this","confidence":"medium","category":"professional","reasonCodes":["professional_content","unknown_diagnostic"],"explanation":"The primary explanation remains authoritative."}
+            """);
+
+        Assert.Null(result.Output);
+        Assert.Equal(ClassifierConfidence.Medium, result.Confidence);
+        Assert.Equal(ClassifierCategory.Professional, result.Category);
+        Assert.Equal([ClassifierReasonCode.ProfessionalContent], result.ReasonCodes);
+        Assert.Equal(["professional_content", "unknown_diagnostic"], result.RawReasonCodes);
+        Assert.Equal("The primary explanation remains authoritative.", result.Explanation);
+        Assert.Contains("recommendation_unrecognized", result.Warnings);
+        Assert.Contains("unknown_reason_codes_retained", result.Warnings);
+    }
+
+    [Fact]
     public void KeepWithOnlyNoiseSignals_ProducesNonFatalSemanticWarning()
     {
         var result = ClassifierOutputNormalizer.NormalizePrimary("""

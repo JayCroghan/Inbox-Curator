@@ -103,6 +103,7 @@ erDiagram
         TEXT Recommendation
         TEXT Confidence
         TEXT PrimaryResponse
+        TEXT RepairResponse
         TEXT PrimaryExplanation
         TEXT NormalizationMode
         TEXT NormalizationWarningsJson
@@ -231,7 +232,7 @@ Stores immutable primary prompt text, SHA-256, output schema version, actual JSO
 
 ### `ClassifierResults`
 
-The unique `(ClassifierRunProfileId, EvaluationCorpusItemId)` pair is the resume/idempotency boundary. Each row stores completion/schema/request status; canonical recommendation, confidence, category, and reason codes; the complete primary final response and user-visible explanation; raw reason values; normalization mode and warnings; semantic warnings; repair failure code; primary and repair duration/token counters; whether thinking was present and its character count (never the thinking text); and the cold-primary flag. V1 rationale remains readable. Results cannot alter `ClusterDecisions`.
+The unique `(ClassifierRunProfileId, EvaluationCorpusItemId)` pair is the resume/idempotency boundary. Each row stores completion/schema/request status; canonical recommendation, confidence, category, and reason codes; the complete primary and repair final responses plus user-visible primary explanation; raw reason values; normalization mode and warnings; semantic warnings; repair failure code; primary and repair duration/token counters; whether thinking was present and its character count (never the thinking text); and the cold-primary flag. Repair contributes only the recommendation; every other canonical field remains derived from primary normalization. V1 rationale remains readable. Results cannot alter `ClusterDecisions`.
 
 ## Deliberately absent
 

@@ -335,6 +335,7 @@ public sealed class OllamaClusterClassifier(IOllamaApiClient client) : IClusterC
                 return Completed(
                     output,
                     primary,
+                    null,
                     output.Rationale,
                     output.ReasonCodes.Select(ClassifierOutputValidator.ReasonCodeValue).ToArray(),
                     ClassifierNormalizationMode.Direct,
@@ -346,6 +347,7 @@ public sealed class OllamaClusterClassifier(IOllamaApiClient client) : IClusterC
             {
                 return Failed(
                     primary,
+                    null,
                     [exception.Code],
                     $"schema_{exception.Code}",
                     null,
@@ -360,6 +362,7 @@ public sealed class OllamaClusterClassifier(IOllamaApiClient client) : IClusterC
             return Completed(
                 direct.Output,
                 primary,
+                null,
                 direct.Explanation,
                 direct.RawReasonCodes,
                 ClassifierNormalizationMode.Direct,
@@ -381,6 +384,7 @@ public sealed class OllamaClusterClassifier(IOllamaApiClient client) : IClusterC
         {
             return Failed(
                 primary,
+                null,
                 direct.Warnings,
                 "normalization_failed",
                 RepairFailureCode(exception),
@@ -391,12 +395,13 @@ public sealed class OllamaClusterClassifier(IOllamaApiClient client) : IClusterC
         }
 
         var repairMetrics = Metrics(repair);
-        var repaired = ClassifierOutputNormalizer.NormalizeRepair(repair.Content);
+        var repaired = ClassifierOutputNormalizer.NormalizeRepairRecommendation(repair.Content);
         var warnings = direct.Warnings.Concat(repaired.Warnings).Distinct(StringComparer.Ordinal).ToArray();
-        if (repaired.Output is null)
+        if (!repaired.Recommendation.HasValue)
         {
             return Failed(
                 primary,
+                repair.Content,
                 warnings,
                 "normalization_failed",
                 $"repair_{repaired.FailureCode ?? "invalid_output"}",
@@ -406,10 +411,16 @@ public sealed class OllamaClusterClassifier(IOllamaApiClient client) : IClusterC
                 direct.RawReasonCodes);
         }
 
-        var canonical = repaired.Output with { Rationale = direct.Explanation ?? string.Empty };
+        var canonical = new ValidatedClassifierOutput(
+            repaired.Recommendation.Value,
+            direct.Confidence,
+            direct.Category,
+            direct.ReasonCodes,
+            direct.Explanation ?? string.Empty);
         return Completed(
             canonical,
             primary,
+            repair.Content,
             direct.Explanation,
             direct.RawReasonCodes,
             ClassifierNormalizationMode.SelfRepaired,
@@ -421,6 +432,7 @@ public sealed class OllamaClusterClassifier(IOllamaApiClient client) : IClusterC
     private static ClusterClassifierResponse Completed(
         ValidatedClassifierOutput output,
         OllamaChatResponse primary,
+        string? repairResponse,
         string? explanation,
         IReadOnlyList<string> rawReasonCodes,
         ClassifierNormalizationMode mode,
@@ -429,6 +441,7 @@ public sealed class OllamaClusterClassifier(IOllamaApiClient client) : IClusterC
         ClassifierResponseMetrics? repairMetrics) => new(
             output,
             primary.Content,
+            repairResponse,
             explanation,
             rawReasonCodes,
             mode,
@@ -441,6 +454,7 @@ public sealed class OllamaClusterClassifier(IOllamaApiClient client) : IClusterC
 
     private static ClusterClassifierResponse Failed(
         OllamaChatResponse primary,
+        string? repairResponse,
         IReadOnlyList<string> normalizationWarnings,
         string failureCode,
         string? repairFailureCode,
@@ -450,6 +464,7 @@ public sealed class OllamaClusterClassifier(IOllamaApiClient client) : IClusterC
         IReadOnlyList<string>? rawReasonCodes = null) => new(
             null,
             primary.Content,
+            repairResponse,
             explanation,
             rawReasonCodes ?? [],
             ClassifierNormalizationMode.Failed,

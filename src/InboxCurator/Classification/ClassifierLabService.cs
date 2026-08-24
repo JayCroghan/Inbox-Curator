@@ -5,6 +5,15 @@ using Microsoft.Extensions.Options;
 
 namespace InboxCurator.Classification;
 
+public enum ClassifierInspectionMode
+{
+    Disagreements,
+    SelfRepaired,
+    SemanticWarnings,
+    NormalizationWarnings,
+    All
+}
+
 public sealed record CorpusLabSummary(
     long Id,
     string Version,
@@ -88,6 +97,7 @@ public sealed record ClassifierDisagreement(
     IReadOnlyList<string> RawReasonCodes,
     string? Rationale,
     string? PrimaryResponse,
+    string? RepairResponse,
     ClassifierNormalizationMode? NormalizationMode,
     IReadOnlyList<string> NormalizationWarnings,
     IReadOnlyList<string> SemanticWarnings,
@@ -114,8 +124,9 @@ public sealed record ClassifierLabSnapshot(
     RunLabSummary? SelectedRun,
     IReadOnlyList<RunLabSummary> RecentRuns,
     IReadOnlyList<ClassifierScore> Scores,
-    IReadOnlyList<ClassifierDisagreement> Disagreements,
-    int DisagreementCount,
+    IReadOnlyList<ClassifierDisagreement> InspectionResults,
+    int InspectionResultCount,
+    ClassifierInspectionMode InspectionMode,
     int ErrorPage,
     int ErrorPageCount,
     bool HoldoutDetailsVisible);
@@ -132,6 +143,7 @@ public sealed class ClassifierLabService(
         long? profileId,
         string scoreSort,
         string direction,
+        ClassifierInspectionMode inspectionMode,
         int errorPage,
         CancellationToken cancellationToken)
     {
@@ -187,8 +199,8 @@ public sealed class ClassifierLabService(
             .ToArrayAsync(cancellationToken);
         var selectedRunSummary = recentRuns.FirstOrDefault(item => item.Id == runId) ?? recentRuns.FirstOrDefault();
         var scores = Array.Empty<ClassifierScore>();
-        var disagreements = Array.Empty<ClassifierDisagreement>();
-        var disagreementCount = 0;
+        var inspectionResults = Array.Empty<ClassifierDisagreement>();
+        var inspectionResultCount = 0;
         var pageCount = 0;
         var holdoutDetailsVisible = selectedRunSummary?.Stage != ClassifierRunStage.Holdout;
 
@@ -249,17 +261,28 @@ public sealed class ClassifierLabService(
             if (holdoutDetailsVisible)
             {
                 var query = db.ClassifierResults.AsNoTracking()
-                    .Where(item => item.ClassifierRunId == run.Id &&
-                        (item.Status != ClassifierResultStatus.Completed ||
-                         (item.EvaluationCorpusItem.GroundTruth == EvaluationGroundTruth.Keep && item.Recommendation != ClassifierRecommendation.Keep) ||
-                         (item.EvaluationCorpusItem.GroundTruth == EvaluationGroundTruth.Unwanted && item.Recommendation != ClassifierRecommendation.Unwanted)));
+                    .Where(item => item.ClassifierRunId == run.Id);
+                query = inspectionMode switch
+                {
+                    ClassifierInspectionMode.SelfRepaired => query.Where(item =>
+                        item.NormalizationMode == ClassifierNormalizationMode.SelfRepaired),
+                    ClassifierInspectionMode.SemanticWarnings => query.Where(item =>
+                        item.SemanticWarningsJson != null && item.SemanticWarningsJson != "[]"),
+                    ClassifierInspectionMode.NormalizationWarnings => query.Where(item =>
+                        item.NormalizationWarningsJson != null && item.NormalizationWarningsJson != "[]"),
+                    ClassifierInspectionMode.All => query,
+                    _ => query.Where(item =>
+                        item.Status != ClassifierResultStatus.Completed ||
+                        (item.EvaluationCorpusItem.GroundTruth == EvaluationGroundTruth.Keep && item.Recommendation != ClassifierRecommendation.Keep) ||
+                        (item.EvaluationCorpusItem.GroundTruth == EvaluationGroundTruth.Unwanted && item.Recommendation != ClassifierRecommendation.Unwanted))
+                };
                 if (profileId.HasValue)
                 {
                     query = query.Where(item => item.ClassifierRunProfileId == profileId.Value);
                 }
 
-                disagreementCount = await query.CountAsync(cancellationToken);
-                pageCount = Math.Max(1, (int)Math.Ceiling(disagreementCount / (double)DisagreementPageSize));
+                inspectionResultCount = await query.CountAsync(cancellationToken);
+                pageCount = Math.Max(1, (int)Math.Ceiling(inspectionResultCount / (double)DisagreementPageSize));
                 errorPage = Math.Clamp(errorPage, 1, pageCount);
                 var rows = await query
                     .OrderByDescending(item => item.EvaluationCorpusItem.GroundTruth == EvaluationGroundTruth.Keep && item.Recommendation == ClassifierRecommendation.Unwanted)
@@ -283,13 +306,14 @@ public sealed class ClassifierLabService(
                         item.Rationale,
                         item.PrimaryExplanation,
                         item.PrimaryResponse,
+                        item.RepairResponse,
                         item.NormalizationMode,
                         item.NormalizationWarningsJson,
                         item.SemanticWarningsJson,
                         item.RepairFailureCode
                     })
                     .ToArrayAsync(cancellationToken);
-                disagreements = rows.Select(item => new ClassifierDisagreement(
+                inspectionResults = rows.Select(item => new ClassifierDisagreement(
                     item.Id,
                     item.ProfileKey,
                     item.ModelName,
@@ -306,6 +330,7 @@ public sealed class ClassifierLabService(
                     DeserializeStrings(item.RawReasonCodesJson),
                     item.PrimaryExplanation ?? item.Rationale,
                     item.PrimaryResponse,
+                    item.RepairResponse,
                     item.NormalizationMode,
                     DeserializeStrings(item.NormalizationWarningsJson),
                     DeserializeStrings(item.SemanticWarningsJson),
@@ -336,8 +361,9 @@ public sealed class ClassifierLabService(
             selectedRunSummary,
             recentRuns,
             scores,
-            disagreements,
-            disagreementCount,
+            inspectionResults,
+            inspectionResultCount,
+            inspectionMode,
             errorPage,
             pageCount,
             holdoutDetailsVisible);

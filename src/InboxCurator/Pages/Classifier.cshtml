@@ -223,26 +223,43 @@
                     </tbody>
                 </table>
             </div>
-            <p class="lab-micro">* Binary accuracy excludes abstentions. Primary and repair timings are separate; cold primary requests are excluded from steady-state latency and throughput. V1 is strict-schema; V2 is normalize + one repair.</p>
+            <p class="lab-micro">* Binary accuracy excludes abstentions. Primary and repair timings are separate; cold primary requests are excluded from steady-state latency and throughput. V1 is strict-schema; V2 is primary normalization plus recommendation-only repair.</p>
         </section>
 
         <section class="disagreement-section">
             <div class="section-heading-row">
-                <div><p class="eyebrow">Read-only inspection</p><h2>Disagreements & failures</h2></div>
-                <p>@Model.Snapshot.DisagreementCount.ToString("N0") records · frozen evidence only</p>
+                <div><p class="eyebrow">Read-only inspection</p><h2>@ClassifierModel.InspectionLabel(Model.Snapshot.InspectionMode)</h2></div>
+                <div class="inspection-controls">
+                    <form method="get">
+                        <input type="hidden" name="runId" value="@selectedRun.Id" />
+                        @if (Model.ProfileId.HasValue)
+                        {
+                            <input type="hidden" name="profileId" value="@Model.ProfileId.Value" />
+                        }
+                        <label>Inspection view
+                            <select name="InspectionMode" data-auto-submit>
+                                @foreach (var mode in Enum.GetValues<ClassifierInspectionMode>())
+                                {
+                                    <option value="@mode" selected="@(mode == Model.Snapshot.InspectionMode)">@ClassifierModel.InspectionLabel(mode)</option>
+                                }
+                            </select>
+                        </label>
+                    </form>
+                    <p>@Model.Snapshot.InspectionResultCount.ToString("N0") records · frozen evidence only</p>
+                </div>
             </div>
             @if (!Model.Snapshot.HoldoutDetailsVisible)
             {
                 <div class="locked-details">Holdout examples are not exposed or executed in MAIL-003A.1.</div>
             }
-            else if (Model.Snapshot.Disagreements.Count == 0)
+            else if (Model.Snapshot.InspectionResults.Count == 0)
             {
-                <div class="empty-state">No disagreements have been recorded for this run.</div>
+                <div class="empty-state">No results match this inspection view.</div>
             }
             else
             {
                 <div class="disagreement-list">
-                @foreach (var item in Model.Snapshot.Disagreements)
+                @foreach (var item in Model.Snapshot.InspectionResults)
                 {
                     var dangerous = item.GroundTruth == EvaluationGroundTruth.Keep && item.Recommendation == ClassifierRecommendation.Unwanted;
                     <details class="disagreement-item @(dangerous ? "is-dangerous" : null)">
@@ -259,7 +276,7 @@
                                 <div><dt>List unsubscribe</dt><dd>@item.ListUnsubscribePercentage.ToString("N1")%</dd></div><div><dt>Attachments</dt><dd>@item.AttachmentPercentage.ToString("N1")%</dd></div>
                             </dl>
                             <div class="classifier-explanation">
-                                <p><strong>Canonical:</strong> @item.Category · @(item.ReasonCodes.Count == 0 ? "no recognized reason codes" : string.Join(", ", item.ReasonCodes))</p>
+                                <p><strong>@(item.NormalizationMode == ClassifierNormalizationMode.SelfRepaired ? "Canonical (primary-derived diagnostics):" : "Canonical:")</strong> @item.Category · @(item.ReasonCodes.Count == 0 ? "no recognized reason codes" : string.Join(", ", item.ReasonCodes))</p>
                                 <p><strong>Normalization:</strong> @(item.NormalizationMode?.ToString() ?? "Legacy strict V1")</p>
                                 @if (item.RawReasonCodes.Count > 0)
                                 {
@@ -278,9 +295,13 @@
                                     <p><strong>Repair failure:</strong> @item.RepairFailureCode</p>
                                 }
                                 <p class="primary-explanation"><strong>Primary explanation</strong><br />@(item.Rationale ?? item.FailureCode ?? "No explanation was recoverable; inspect the stored primary response below.")</p>
-                                @if (!string.IsNullOrWhiteSpace(item.PrimaryResponse) && string.IsNullOrWhiteSpace(item.Rationale))
+                                @if (!string.IsNullOrWhiteSpace(item.PrimaryResponse))
                                 {
                                     <details><summary>Stored primary final response</summary><pre>@item.PrimaryResponse</pre></details>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(item.RepairResponse))
+                                {
+                                    <details><summary>Stored repair final response</summary><pre>@item.RepairResponse</pre></details>
                                 }
                             </div>
                             <ol>
@@ -290,11 +311,11 @@
                     </details>
                 }
                 </div>
-                <nav class="pagination" aria-label="Disagreement pages">
+                <nav class="pagination" aria-label="Inspection result pages">
                     <span>Page @Model.Snapshot.ErrorPage of @Model.Snapshot.ErrorPageCount</span>
                     <div>
-                        <a class="@(Model.Snapshot.ErrorPage <= 1 ? "is-disabled" : null)" asp-route-runId="@selectedRun.Id" asp-route-errorPage="@(Model.Snapshot.ErrorPage - 1)">Previous</a>
-                        <a class="@(Model.Snapshot.ErrorPage >= Model.Snapshot.ErrorPageCount ? "is-disabled" : null)" asp-route-runId="@selectedRun.Id" asp-route-errorPage="@(Model.Snapshot.ErrorPage + 1)">Next</a>
+                        <a class="@(Model.Snapshot.ErrorPage <= 1 ? "is-disabled" : null)" asp-route-runId="@selectedRun.Id" asp-route-profileId="@Model.ProfileId" asp-route-inspectionMode="@Model.Snapshot.InspectionMode" asp-route-errorPage="@(Model.Snapshot.ErrorPage - 1)">Previous</a>
+                        <a class="@(Model.Snapshot.ErrorPage >= Model.Snapshot.ErrorPageCount ? "is-disabled" : null)" asp-route-runId="@selectedRun.Id" asp-route-profileId="@Model.ProfileId" asp-route-inspectionMode="@Model.Snapshot.InspectionMode" asp-route-errorPage="@(Model.Snapshot.ErrorPage + 1)">Next</a>
                     </div>
                 </nav>
             }

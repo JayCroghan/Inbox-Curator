@@ -78,6 +78,12 @@ namespace InboxCurator.Data.Migrations
                 type: "INTEGER",
                 nullable: true);
 
+            migrationBuilder.AddColumn<string>(
+                name: "RepairResponse",
+                table: "ClassifierResults",
+                type: "TEXT",
+                nullable: true);
+
             migrationBuilder.AddColumn<long>(
                 name: "RepairTotalDurationNanoseconds",
                 table: "ClassifierResults",
@@ -191,6 +197,10 @@ namespace InboxCurator.Data.Migrations
 
             migrationBuilder.DropColumn(
                 name: "RepairPromptEvalDurationNanoseconds",
+                table: "ClassifierResults");
+
+            migrationBuilder.DropColumn(
+                name: "RepairResponse",
                 table: "ClassifierResults");
 
             migrationBuilder.DropColumn(

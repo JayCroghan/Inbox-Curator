@@ -40,5 +40,10 @@ public sealed class ClassifierPromptVersionTests
         Assert.DoesNotContain("additionalProperties", v2.OutputJsonSchema, StringComparison.Ordinal);
         Assert.DoesNotContain("uniqueItems", v2.RepairOutputJsonSchema!, StringComparison.Ordinal);
         Assert.DoesNotContain("maxItems", v2.RepairOutputJsonSchema!, StringComparison.Ordinal);
+        Assert.DoesNotContain("enum", v2.RepairOutputJsonSchema!, StringComparison.Ordinal);
+        Assert.DoesNotContain("confidence", v2.RepairOutputJsonSchema!, StringComparison.Ordinal);
+        Assert.DoesNotContain("category", v2.RepairOutputJsonSchema!, StringComparison.Ordinal);
+        Assert.DoesNotContain("reasonCodes", v2.RepairOutputJsonSchema!, StringComparison.Ordinal);
+        Assert.Contains("Extract only", v2.RepairSystemPrompt!, StringComparison.Ordinal);
     }
 }

@@ -338,6 +338,7 @@ public sealed class ClassifierRunExecutor(
                     : JsonSerializer.Serialize(response.Output.ReasonCodes.Select(ClassifierOutputValidator.ReasonCodeValue)),
                 Rationale = prompt.ResponseProtocol == ClassifierResponseProtocol.StrictV1 ? response.Output?.Rationale : null,
                 PrimaryResponse = response.PrimaryResponse,
+                RepairResponse = response.RepairResponse,
                 PrimaryExplanation = response.PrimaryExplanation,
                 RawReasonCodesJson = JsonSerializer.Serialize(response.RawReasonCodes),
                 NormalizationMode = response.NormalizationMode,
